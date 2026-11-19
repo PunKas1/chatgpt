@@ -17,8 +17,8 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QPainter, QPalette, QPixmap, QRadialGradient,
     QTransform)
 from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QLineEdit,
-    QMainWindow, QMenu, QMenuBar, QPlainTextEdit,
-    QPushButton, QSizePolicy, QWidget)
+    QListView, QMainWindow, QMenu, QMenuBar,
+    QPlainTextEdit, QPushButton, QSizePolicy, QWidget)
 
 class Ui_Messenger(object):
     def setupUi(self, Messenger):
@@ -29,19 +29,14 @@ class Ui_Messenger(object):
         self.actionConectar.setObjectName(u"actionConectar")
         self.actionSalir = QAction(Messenger)
         self.actionSalir.setObjectName(u"actionSalir")
+        self.actionMis_Comunidades = QAction(Messenger)
+        self.actionMis_Comunidades.setObjectName(u"actionMis_Comunidades")
+        self.actionMas_Comunidades = QAction(Messenger)
+        self.actionMas_Comunidades.setObjectName(u"actionMas_Comunidades")
         self.centralwidget = QWidget(Messenger)
         self.centralwidget.setObjectName(u"centralwidget")
         self.gridLayout = QGridLayout(self.centralwidget)
         self.gridLayout.setObjectName(u"gridLayout")
-        self.txtMsgs = QPlainTextEdit(self.centralwidget)
-        self.txtMsgs.setObjectName(u"txtMsgs")
-        self.txtMsgs.setEnabled(True)
-        self.txtMsgs.setFrameShape(QFrame.Box)
-        self.txtMsgs.setFrameShadow(QFrame.Raised)
-        self.txtMsgs.setReadOnly(True)
-
-        self.gridLayout.addWidget(self.txtMsgs, 0, 0, 1, 2)
-
         self.txtSend = QLineEdit(self.centralwidget)
         self.txtSend.setObjectName(u"txtSend")
         self.txtSend.setMaxLength(1023)
@@ -53,18 +48,37 @@ class Ui_Messenger(object):
 
         self.gridLayout.addWidget(self.btnSend, 1, 1, 1, 1)
 
+        self.txtMsgs = QPlainTextEdit(self.centralwidget)
+        self.txtMsgs.setObjectName(u"txtMsgs")
+        self.txtMsgs.setEnabled(True)
+        self.txtMsgs.setFrameShape(QFrame.Shape.Box)
+        self.txtMsgs.setFrameShadow(QFrame.Shadow.Raised)
+        self.txtMsgs.setReadOnly(True)
+
+        self.gridLayout.addWidget(self.txtMsgs, 0, 1, 1, 1)
+
+        self.listaChats = QListView(self.centralwidget)
+        self.listaChats.setObjectName(u"listaChats")
+
+        self.gridLayout.addWidget(self.listaChats, 0, 0, 1, 1)
+
         Messenger.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(Messenger)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 493, 21))
+        self.menubar.setGeometry(QRect(0, 0, 493, 33))
         self.menuArchivo = QMenu(self.menubar)
         self.menuArchivo.setObjectName(u"menuArchivo")
+        self.menuComunidades = QMenu(self.menubar)
+        self.menuComunidades.setObjectName(u"menuComunidades")
         Messenger.setMenuBar(self.menubar)
 
         self.menubar.addAction(self.menuArchivo.menuAction())
+        self.menubar.addAction(self.menuComunidades.menuAction())
         self.menuArchivo.addAction(self.actionConectar)
         self.menuArchivo.addSeparator()
         self.menuArchivo.addAction(self.actionSalir)
+        self.menuComunidades.addAction(self.actionMis_Comunidades)
+        self.menuComunidades.addAction(self.actionMas_Comunidades)
 
         self.retranslateUi(Messenger)
 
@@ -81,7 +95,10 @@ class Ui_Messenger(object):
 #if QT_CONFIG(shortcut)
         self.actionSalir.setShortcut(QCoreApplication.translate("Messenger", u"Ctrl+X", None))
 #endif // QT_CONFIG(shortcut)
+        self.actionMis_Comunidades.setText(QCoreApplication.translate("Messenger", u"Mis Comunidades", None))
+        self.actionMas_Comunidades.setText(QCoreApplication.translate("Messenger", u"Mas Comunidades", None))
         self.btnSend.setText(QCoreApplication.translate("Messenger", u"Enviar", None))
         self.menuArchivo.setTitle(QCoreApplication.translate("Messenger", u"&Archivo", None))
+        self.menuComunidades.setTitle(QCoreApplication.translate("Messenger", u"Comunidades", None))
     # retranslateUi
 

@@ -15,22 +15,6 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QGridLayout" name="gridLayout">
-    <item row="0" column="0" colspan="2">
-     <widget class="QPlainTextEdit" name="txtMsgs">
-      <property name="enabled">
-       <bool>true</bool>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::Box</enum>
-      </property>
-      <property name="frameShadow">
-       <enum>QFrame::Raised</enum>
-      </property>
-      <property name="readOnly">
-       <bool>true</bool>
-      </property>
-     </widget>
-    </item>
     <item row="1" column="0">
      <widget class="QLineEdit" name="txtSend">
       <property name="maxLength">
@@ -45,6 +29,25 @@
       </property>
      </widget>
     </item>
+    <item row="0" column="1">
+     <widget class="QPlainTextEdit" name="txtMsgs">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Shape::Box</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Shadow::Raised</enum>
+      </property>
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="0">
+     <widget class="QListView" name="listaChats"/>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">
@@ -53,7 +56,7 @@
      <x>0</x>
      <y>0</y>
      <width>493</width>
-     <height>21</height>
+     <height>33</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuArchivo">
@@ -64,7 +67,15 @@
     <addaction name="separator"/>
     <addaction name="actionSalir"/>
    </widget>
+   <widget class="QMenu" name="menuComunidades">
+    <property name="title">
+     <string>Comunidades</string>
+    </property>
+    <addaction name="actionMis_Comunidades"/>
+    <addaction name="actionMas_Comunidades"/>
+   </widget>
    <addaction name="menuArchivo"/>
+   <addaction name="menuComunidades"/>
   </widget>
   <action name="actionConectar">
    <property name="text">
@@ -80,6 +91,16 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+X</string>
+   </property>
+  </action>
+  <action name="actionMis_Comunidades">
+   <property name="text">
+    <string>Mis Comunidades</string>
+   </property>
+  </action>
+  <action name="actionMas_Comunidades">
+   <property name="text">
+    <string>Mas Comunidades</string>
    </property>
   </action>
  </widget>

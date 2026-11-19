@@ -1,10 +1,14 @@
 import socket
 import threading
 
+
+clients_lock = threading.Lock()
+
 class Cliente:
-    name = ""
-    conn = None
-    addr = None
+    def __init__(self):
+        self.name = ""
+        self.conn = None
+        self.addr = None
 
 def clientthread(conn, addr):
     conn.send(bytes(f"Bienvenido {addr}\n", 'utf-8'))
@@ -31,8 +35,9 @@ def clientthread(conn, addr):
 def setName(connection, name:str):
     for client in list_of_clients:
         if client.conn == connection:
-            client.name = name
+            client.name = name.strip()
             break
+    broadcast_connected_users()
 
 def getName(connection) -> str:
     for client in list_of_clients:
@@ -52,6 +57,25 @@ def broadcast(message, connection):
 def remove(connection):
     if connection in list_of_clients:
         list_of_clients.remove(connection)
+
+def removeClient(Cliente):
+    if connection in list_of_clients:
+        list_of_clients.remove(connection)
+
+def connected_users() -> list[str]:
+    return [c.name for c in list_of_clients if c.name]
+
+def broadcast_connected_users():
+    users = ",".join(connected_users())
+    package =f"<users>{users}</users>\n".encode('utf-8')
+    for client in list_of_clients:
+        try:
+            client.conn.sendall(package)
+        except OSError:
+            remove(client)
+
+
+
 
 if __name__ == "__main__":
     #host = socket.gethostname()  # Esta función nos da el nombre de la máquina
