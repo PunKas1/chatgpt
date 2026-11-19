@@ -31,3 +31,37 @@ def obtener_historial():
     resultados = cursor.fetchall()
     conexion.close()
     return resultados
+
+def crear_usuario(nombre_usuario, contrasena):
+    conexion = obtener_conexion()
+    try:
+        cursor = conexion.cursor()
+        # Verificar si el usuario ya existe
+        cursor.execute(
+            "SELECT id_usuario FROM dbo.Usuarios WHERE nombre_usuario = ?",
+            (nombre_usuario,),
+        )
+        if cursor.fetchone():
+            return False
+
+        cursor.execute(
+            "INSERT INTO dbo.Usuarios (nombre_usuario, contrasena) VALUES (?, ?)",
+            (nombre_usuario, contrasena),
+        )
+        conexion.commit()
+        return True
+    finally:
+        conexion.close()
+
+def autenticar_usuario(nombre_usuario, contrasena):
+    """Retorna (id_usuario, nombre_usuario) si las credenciales son válidas, o None."""
+    conexion = obtener_conexion()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(
+            "SELECT id_usuario, nombre_usuario FROM dbo.Usuarios WHERE nombre_usuario = ? AND contrasena = ?",
+            (nombre_usuario, contrasena),
+        )
+        return cursor.fetchone()
+    finally:
+        conexion.close()
