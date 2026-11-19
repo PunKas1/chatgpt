@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>478</width>
+    <height>578</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QGridLayout" name="gridLayout">
+   <item row="0" column="0">
+    <widget class="QFrame" name="card_login">
+     <property name="minimumSize">
+      <size>
+       <width>460</width>
+       <height>560</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>460</width>
+       <height>560</height>
+      </size>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">/* Fondo general de la ventana */
+#Form {
+    background-color: rgb(2, 34, 5);
+}
+
+/* Tarjeta central con bordes redondos y borde sutil */
+#card_login {
+    background-color: rgb(39, 39, 39);
+    border: 1px solid #27272a;
+    border-radius: 16px;
+    padding: 24px;
+}
+
+/* Estilo base para cualquier QLabel nuevo (evita texto negro invisible) */
+QLabel {
+    color: #ffffff;
+    font-family: &quot;Segoe UI&quot;;
+    font-size: 14px;
+}
+
+/* Título principal */
+#label_4 {
+    color: #ffffff;
+    font-family: &quot;Comic Sans MS&quot;;
+    font-size: 35px; 
+    font-weight: bold;
+}
+
+#label_7{
+	color: rgb(13, 104, 223);
+    font-family: &quot;Comic Sans MS&quot;;
+    font-size: 25px; 
+    font-weight: bold;
+}
+
+/* Etiquetas de campos (con el guion bajo que asigna Qt Designer) */
+#label_2, #label_3, #label_5, #label_6{
+    color: #ffffff;
+    font-family: &quot;Comic Sans MS&quot;;
+    font-size: 16px;
+    font-weight: normal;
+}
+QLineEdit {
+    background-color: rgb(29, 29, 29);
+    color: rgb(255, 255, 255);
+    font-family: &quot;Comic Sans MS&quot;;
+    font-size: 10px;
+    border: 1px solid rgb(60, 60, 60);
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+
+
+#bton_login {
+    background-color: #ffffff;
+    color: #09090b;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-family: &quot;Segoe UI&quot;;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+#bton_login:hover {
+    background-color: #e4e4e7;
+}
+
+/* Botón secundario oscuro con borde */
+#bton_crear {
+    background-color: #1e1e22;
+    color: #ffffff;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-family: &quot;Segoe UI&quot;;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+#bton_crear:hover {
+    background-color: #27272a;
+}</string>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Shape::StyledPanel</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Shadow::Raised</enum>
+     </property>
+     <widget class="QLineEdit" name="lineEdit">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>170</y>
+        <width>201</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>EjemUser</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="lineEdit_2">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>240</y>
+        <width>201</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>Password</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="bton_login">
+      <property name="geometry">
+       <rect>
+        <x>100</x>
+        <y>460</y>
+        <width>121</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Iniciar sesión</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="bton_crear">
+      <property name="geometry">
+       <rect>
+        <x>240</x>
+        <y>460</y>
+        <width>121</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Crear cuenta</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_2">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>150</y>
+        <width>101</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Usuario:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_3">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>220</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Contraseña:</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_4">
+      <property name="geometry">
+       <rect>
+        <x>60</x>
+        <y>20</y>
+        <width>341</width>
+        <height>61</height>
+       </rect>
+      </property>
+      <property name="font">
+       <font>
+        <family>Comic Sans MS</family>
+        <pointsize>-1</pointsize>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Chat de Gpt</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignCenter</set>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_5">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>290</y>
+        <width>121</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>IP del Servidor:</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="lineEdit_3">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>310</y>
+        <width>201</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>0.000.000.0</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_6">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>360</y>
+        <width>111</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Puerto:</string>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="lineEdit_4">
+      <property name="geometry">
+       <rect>
+        <x>130</x>
+        <y>380</y>
+        <width>201</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string/>
+      </property>
+      <property name="placeholderText">
+       <string>####</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_7">
+      <property name="geometry">
+       <rect>
+        <x>60</x>
+        <y>70</y>
+        <width>341</width>
+        <height>61</height>
+       </rect>
+      </property>
+      <property name="font">
+       <font>
+        <family>Comic Sans MS</family>
+        <pointsize>-1</pointsize>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Inicio de Sesión</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignCenter</set>
+      </property>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
