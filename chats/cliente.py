@@ -1,4 +1,6 @@
 from PySide6.QtWidgets import QMainWindow, QDialog
+from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtGui import QStandardItemModel, QStandardItem
 from uis.principal_ui import *
 from uis.conectar_ui import *
 from PySide6.QtCore import QThread, Signal
@@ -49,6 +51,11 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.btnSend.clicked.connect(self.mensaje_saliente)
         self.setWindowTitle("Messenger - Desconectado")
         self.txtSend.returnPressed.connect(self.mensaje_saliente)
+        self.modelo_chats = QStandardItemModel()
+        self.listaChats.setModel(self.modelo_chats)
+        self.actualizar_usuarios(["Ana", "Luis", "Sofía"])
+        self.listaChats.clicked.connect(self.user_seleccionado)
+
         
     def mensaje_saliente(self):
         str = self.txtSend.text()
@@ -77,6 +84,23 @@ class MainWindow(QMainWindow, Ui_Messenger):
     def mensage_entrante(self, mensaje):
         self.txtMsgs.setPlainText(self.txtMsgs.toPlainText() + mensaje)
         self.txtMsgs.verticalScrollBar().setValue(self.txtMsgs.verticalScrollBar().maximum())
+
+    def actualizar_usuarios(self, usuarios: list[str]):
+        self.modelo_chats.clear()
+        for usuario in usuarios:
+            usuario =usuario.strip()
+            if usuario:
+                item= QStandardItem(usuario)
+                item.setEditable(False)
+                item.setData(usuario, Qt.ItemDataRole.UserRole)
+                self.modelo_chats.appendRow(item)
+
+    def user_seleccionado(self, index:QModelIndex):
+        usuario = index.data(Qt.ItemDataRole.UserRole) or index.data()
+        self.txtSend.setPlaceholderText(f"Mensaje a {usuario}...")
+        self.txtSend.setFocus()
+        if not  usuario:
+            return
         
 
 class MiDialogo(QDialog, Ui_Dialog):

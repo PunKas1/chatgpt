@@ -7,15 +7,20 @@ clients_lock = threading.Lock()
 class Cliente:
     def __init__(self):
         self.name = ""
-        self.conn = None
-        self.addr = None
+        self.conn = conn
+        self.addr = addr
 
 def clientthread(conn, addr):
-    conn.send(bytes(f"Bienvenido {addr}\n", 'utf-8'))
-    while True:
-        #try:
-            message = conn.recv(BUFFER_SIZE)
-            if message:
+    try:
+        conn.sendall(f"Bienvenido {addr}\n".encode('utf-8'))
+    except OSError:
+        pass
+
+        while True:
+                message = conn.recv(BUFFER_SIZE)
+                if not message:
+                        break
+                
                 print(f"<{addr[0]}> {message}")
                 msg = message.decode('utf-8')
                 # Mensajes especiales (comandos)
@@ -25,45 +30,58 @@ def clientthread(conn, addr):
                     broadcast(msg + '\n', conn)
                 else:
                     # Reenviamos el mensaje recibido a todos los demás clientes.
-                    message_to_send = f"<{getName(conn)}> {message.decode('utf-8')}\n"
+                    message_to_send = f"<{getName(conn)}> {msg}\n"
                     broadcast(message_to_send, conn)
-            else:
-                remove(conn)
-        #except:
-        #    break
+    except OSError:
+        pass
+    finally:
+        remove(conn)
+
 
 def setName(connection, name:str):
-    for client in list_of_clients:
-        if client.conn == connection:
-            client.name = name.strip()
-            break
-    broadcast_connected_users()
+    with clients_lock:
+        for client in list_of_clients:
+            if client.conn == connection:
+                client.name = name.strip()
+                break
+        broadcast_connected_users()
 
 def getName(connection) -> str:
-    for client in list_of_clients:
-        if client.conn == connection:
-            return client.name
-    return ""
+    with clients_lock:
+        for client in list_of_clients:
+            if client.conn == connection:
+                return client.name
+        return ""
 
 def broadcast(message, connection):
-    for client in list_of_clients:
-        if client.conn != connection:
-            try:
-                client.conn.send(bytes(message, 'utf-8'))
-            except:
-                client.conn.close()
-                remove(client)
+    with clients_lock:
 
-def remove(connection):
-    if connection in list_of_clients:
-        list_of_clients.remove(connection)
+        for client in list_of_clients:
+            if client.conn != connection:
+                try:
+                    client.conn.send(bytes(message, 'utf-8'))
+                except:
+                    client.conn.close()
+                    remove(client)
 
-def removeClient(Cliente):
-    if connection in list_of_clients:
-        list_of_clients.remove(connection)
+def remove(target):
+    removed =False
+    with clients_lock:
+        for client in list(list_of_clients):
+            if client is target or client.conn == target:
+                list_of_clients.remove(client)
+                try:
+                    client.conn.close()
+                except OSError:
+                    pass
+                removed = True
+                break
+    if removed:
+        broadcast_connected_users()
 
 def connected_users() -> list[str]:
-    return [c.name for c in list_of_clients if c.name]
+    with clients_lock:
+        return [c.name for c in list_of_clients if c.name]
 
 def broadcast_connected_users():
     users = ",".join(connected_users())

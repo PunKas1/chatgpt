@@ -1,0 +1,14 @@
+SELECT
+    m.id_mensaje,
+    u_rem.nombre_usuario AS remitente,
+    u_des.nombre_usuario AS destinatario,
+    m.contenido,
+    m.fecha_envio
+FROM Mensajes m
+INNER JOIN Usuarios u_rem ON m.id_remitente = u_rem.id_usuario
+INNER JOIN Usuarios u_des ON m.id_destinatario = u_des.id_usuario
+WHERE
+    (u_rem.nombre_usuario = @yo AND u_des.nombre_usuario = @otro)
+    OR
+    (u_rem.nombre_usuario = @otro AND u_des.nombre_usuario = @yo)
+ORDER BY m.fecha_envio ASC, m.id_mensaje ASC;

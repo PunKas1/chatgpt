@@ -12,6 +12,7 @@ GO
 CREATE TABLE Mensajes (
     id_mensaje INT IDENTITY(1,1) PRIMARY KEY,
     id_usuario INT NOT NULL,
+    
     fecha_envio DATETIME DEFAULT GETDATE(),
     FOREIGN KEY (id_usuario) REFERENCES Usuarios(id_usuario)
 );
