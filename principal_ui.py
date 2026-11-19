@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'principal.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.9.0
+## Created by: Qt User Interface Compiler version 6.12.0
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -84,3 +84,4 @@ class Ui_Messenger(object):
         self.btnSend.setText(QCoreApplication.translate("Messenger", u"Enviar", None))
         self.menuArchivo.setTitle(QCoreApplication.translate("Messenger", u"&Archivo", None))
     # retranslateUi
+
