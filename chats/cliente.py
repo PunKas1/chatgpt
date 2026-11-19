@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QMainWindow, QDialog
-from principal_ui import *
-from conectar_ui import *
+from uis.principal_ui import *
+from uis.conectar_ui import *
 from PySide6.QtCore import QThread, Signal
 import sys
 import socket
