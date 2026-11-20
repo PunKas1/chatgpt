@@ -2,36 +2,59 @@ import socket
 import threading
 
 class Cliente:
+    user_id= ""
     name = ""
     conn = None
     addr = None
 
-def clientthread(conn, addr):
-    conn.send(bytes(f"Bienvenido {addr}\n", 'utf-8'))
-    while True:
-        #try:
-            message = conn.recv(BUFFER_SIZE)
-            if message:
-                print(f"<{addr[0]}> {message}")
-                msg = message.decode('utf-8')
-                # Mensajes especiales (comandos)
-                if msg.startswith('<name>'):
-                    setName(conn, msg.removeprefix('<name>'))
-                elif msg.startswith('<command>'):
-                    broadcast(msg + '\n', conn)
-                else:
-                    # Reenviamos el mensaje recibido a todos los demás clientes.
-                    message_to_send = f"<{getName(conn)}> {message.decode('utf-8')}\n"
-                    broadcast(message_to_send, conn)
-            else:
-                remove(conn)
-        #except:
-        #    break
+def isUserConnected(user_id: str, name: str) -> bool:
+    for client in list_of_clients:
+        if (user_id and client.user_id == user_id) or (
+            client.name.lower() == name.lower()
+        ):
+            return True
+    return False
 
-def setName(connection, name:str):
+def setName(connection, name: str, user_id: str = ""):
     for client in list_of_clients:
         if client.conn == connection:
             client.name = name
+            client.user_id = user_id
+            break
+
+def clientthread(conn, addr):
+    while True:
+        try:
+            message = conn.recv(BUFFER_SIZE)
+            if message:
+                print(f"<{addr[0]}> {message}")
+                msg = message.decode("utf-8")
+
+                if msg.startswith("<name>"):
+                    datos = msg.removeprefix("<name>")
+                    user_id, nombre = (
+                        datos.split("|", 1) if "|" in datos else ("", datos)
+                    )
+
+                    if isUserConnected(user_id, nombre):
+                        conn.send(bytes("<!!duplicate!!>", "utf-8"))
+                        remove(conn)
+                        conn.close()
+                        break
+
+                    setName(conn, nombre, user_id)
+                    conn.send(bytes(f"Bienvenido {nombre}\n", "utf-8"))
+                elif msg.startswith("<command>"):
+                    broadcast(msg + "\n", conn)
+                else:
+                    remitente = getName(conn) or addr[0]
+                    message_to_send = f"<{remitente}> {msg}\n"
+                    broadcast(message_to_send, conn)
+            else:
+                remove(conn)
+                break
+        except (ConnectionResetError, ConnectionAbortedError, OSError):
+            remove(conn)
             break
 
 def getName(connection) -> str:
@@ -50,11 +73,13 @@ def broadcast(message, connection):
                 remove(client)
 
 def remove(connection):
-    if connection in list_of_clients:
-        list_of_clients.remove(connection)
+    for client in list_of_clients:
+        if client == connection or client.conn == connection:
+            list_of_clients.remove(client)
+            break
 
 if __name__ == "__main__":
-    #host = socket.gethostname()  # Esta función nos da el nombre de la máquina
+    # host = socket.gethostname()  # Esta función nos da el nombre de la máquina
     host = "0.0.0.0"
     port = 80
     BUFFER_SIZE = 1024  # Usamos un número pequeño para tener una respuesta rápida
@@ -63,22 +88,39 @@ if __name__ == "__main__":
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
     server.listen(100)  # Escuchamos hasta 100 clientes
+    server.settimeout(
+        1.0
+    )  # Permite detectar Ctrl + C cada segundo en Windows
     list_of_clients = []  # Lista de clientes conectados
     print(f"Escuchando conexiones en: {(host, port)}")
     try:
         while True:
-            conn, addr = server.accept()
+            try:
+                conn, addr = server.accept()
+                conn.settimeout(
+                    None
+                )  # Mantiene la conexión del cliente sin límite de tiempo
+            except socket.timeout:
+                continue
+
             nuevo_cliente = Cliente()
             nuevo_cliente.conn = conn
             nuevo_cliente.addr = addr
-            #list_of_clients.append(conn)  # Agregamos a la lista de clientes
-            list_of_clients.append(nuevo_cliente)  # Agregamos a la lista de clientes
+            list_of_clients.append(
+                nuevo_cliente
+            )  # Agregamos a la lista de clientes
             print(f"Cliente conectado: {addr}")
             # Creamos y ejecutamos el hilo para atender al cliente
-            threading.Thread(target=clientthread, args=(conn, addr)).start()
+            threading.Thread(
+                target=clientthread, args=(conn, addr), daemon=True
+            ).start()
     except KeyboardInterrupt:
-        print("Caught keyboard interrupt, exiting")
+        print("\nCaught keyboard interrupt, exiting")
     finally:
-        conn.close()
-        server.close()   
+        for client in list_of_clients:
+            try:
+                client.conn.close()
+            except Exception:
+                pass
+        server.close()
     print("Conexión terminada.")

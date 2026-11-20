@@ -48,8 +48,13 @@ class ThreadSocket(QThread):
             connected = False
 
     def stop(self):
-        global connected
+        global connected, server
         connected = False
+        if server:
+            try:
+                server.close()
+            except Exception:
+                pass
         self.wait()
 
 
@@ -194,6 +199,8 @@ class MainWindow(QMainWindow, Ui_Messenger):
         exit()
 
     def showDialog(self):
+        if self.coneccion:
+            self.coneccion.stop()
         dialog = MiDialogo(self)
         resp = dialog.exec()
         if resp == 1:
@@ -204,6 +211,19 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 self.conectar_servidor(host, int(port), self.user_id, user)
 
     def mensage_entrante(self, mensaje):
+        if "<!!duplicate!!>" in mensaje:
+            if self.coneccion:
+                self.coneccion.stop()
+            QMessageBox.warning(
+                self,
+                "Sesión ya activa",
+                f"El perfil '{self.user_name}' ya está conectado en otra ventana.",
+            )
+            self.login = VentanaLogin()
+            self.login.show()
+            self.close()
+            return
+
         self.txtMsgs.setPlainText(self.txtMsgs.toPlainText() + mensaje)
         self.txtMsgs.verticalScrollBar().setValue(
             self.txtMsgs.verticalScrollBar().maximum()
