@@ -200,7 +200,7 @@ def clientthread(conn, addr):
                                 objetivo_conn = c.conn
                                 break
 
-                    if objetivo_conn:
+                    if objetivo_conn and objetivo_conn != conn:
                         try:
                             paquete = f"<msg>{cliente_actual.name}|{contenido}\n".encode("utf-8")
                             objetivo_conn.sendall(paquete)

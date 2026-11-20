@@ -74,7 +74,7 @@ class VentanaLogin(QWidget, Ui_Form):
         self.setupUi(self)
         self.ventana_principal = None
 
-  
+        # Conectar botones de iniciarSesion.ui
         self.bton_login.clicked.connect(self.iniciar_sesion)
         self.bton_crear.clicked.connect(self.crear_cuenta)
 
@@ -200,19 +200,31 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.coneccion.start()
         self.setWindowTitle(f"Messenger - Conectado ({user_name})")
 
+
     def mensaje_saliente(self):
-            texto = self.txtSend.text().strip()
-            if not texto or not connected or not server:
-                return
+        texto = self.txtSend.text().strip()
 
-            if not getattr(self, "usuario_activo", None):
-                self.mensage_entrante("[Selecciona un usuario de la lista de chats primero]\n")
-                return
+        if not texto or not connected or not server:
+            return
 
-            paquete = f"<msg>{self.usuario_activo}|{texto}\n"
-            server.sendall(paquete.encode("utf-8"))
-            self.txtSend.clear()
-            self.mensage_entrante(f"<Tú -> {self.usuario_activo}> {texto}\n")
+        if not getattr(self, "usuario_activo", None):
+            self.mensage_entrante(
+                "[Selecciona un usuario de la lista de chats primero]\n"
+            )
+            return
+
+        paquete = f"<msg>{self.usuario_activo}|{texto}\n"
+        server.sendall(paquete.encode("utf-8"))
+
+        from datetime import datetime
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        self.mensage_entrante(
+            f"[{fecha}] Tú: {texto}\n"
+        )
+
+        self.txtSend.clear()
+
 
     def salir(self):
         if self.coneccion:
@@ -229,33 +241,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
             if host and port and port.isnumeric():
                 self.conectar_servidor(host, int(port), self.user_id, user)
 
-    def procesar_mensaje(self, msg: str):
-        if msg.startswith("<users>"):
-            contenido = msg.removeprefix("<users>")
-            if contenido.endswith("</users>"):
-                contenido = contenido[:-8]
-            elif msg.startswith("<msg>"):
-                payload = msg.removeprefix("<msg>")
-                if "|" in payload:
-                    remitente, contenido = payload.split("|", 1)
-                    remitente = remitente.strip()
-                    if getattr(self, "usuario_activo", None) == remitente:
-                        self.mensage_entrante(f"<{remitente}> {contenido}\n")
-                    else:
-                        self.mensage_entrante(f"[Nuevo mensaje de {remitente}]: {contenido}\n")
-            usuarios = [u.strip() for u in contenido.split(",") if u.strip()]
-            self.actualizar_usuarios(usuarios)
-
-        elif msg.startswith("<historial_data>"):
-            payload = msg.removeprefix("<historial_data>").strip()
-            self.mostrar_historial(payload)
-
-        elif msg.startswith("<historial>") and msg.endswith("</historial>"):
-            payload = msg.removeprefix("<historial>")[:-12].strip()
-            self.mostrar_historial(payload)
-
-        else:
-            self.mensage_entrante(msg + "\n")
 
     def mensage_entrante(self, mensaje):
         self.txtMsgs.setPlainText(self.txtMsgs.toPlainText() + mensaje)
@@ -263,6 +248,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.txtMsgs.verticalScrollBar().maximum()
         )
 
+    
     def mostrar_historial(self, raw_data: str):
         try:
             data = json.loads(raw_data.strip())
@@ -279,8 +265,12 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.txtMsgs.clear()
 
         if not mensajes:
-            self.txtMsgs.appendPlainText(f"No hay mensajes previos con {con_usuario}")
+            self.txtMsgs.appendPlainText(
+                f"No hay mensajes previos con {con_usuario}"
+            )
             return
+
+        from datetime import datetime
 
         for msg in mensajes:
             remitente = msg.get("remitente", "Desconocido")
@@ -288,6 +278,17 @@ class MainWindow(QMainWindow, Ui_Messenger):
             fecha = msg.get("fecha_envio", "")
 
             if fecha:
+                try:
+                    if isinstance(fecha, datetime):
+                        fecha = fecha.strftime("%Y-%m-%d %H:%M:%S")
+                    else:
+                        fecha = str(fecha).replace(",", ".")
+                        fecha = datetime.fromisoformat(fecha).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                except ValueError:
+                    fecha = str(fecha)
+
                 linea = f"[{fecha}] {remitente}: {contenido}"
             else:
                 linea = f"{remitente}: {contenido}"
@@ -296,6 +297,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
 
         scrollbar = self.txtMsgs.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
 
     def actualizar_usuarios(self, usuarios: list[str]):
         self.modelo_chats.clear()
@@ -306,6 +308,8 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 item.setEditable(False)
                 item.setData(usuario, Qt.ItemDataRole.UserRole)
                 self.modelo_chats.appendRow(item)
+
+
 
     def user_seleccionado(self, index: QModelIndex):
         usuario = index.data(Qt.ItemDataRole.UserRole) or index.data()
@@ -321,6 +325,46 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 server.sendall(f"<historial>{usuario}\n".encode("utf-8"))
             except OSError as e:
                 self.mensage_entrante(f"[Error al pedir historial: {e}]\n")
+
+
+    
+
+    def procesar_mensaje(self, msg: str):
+
+        if msg.startswith("<users>"):
+            contenido = msg.removeprefix("<users>")
+
+            if contenido.endswith("</users>"):
+                contenido = contenido[:-8]
+
+            usuarios = [u.strip() for u in contenido.split(",") if u.strip()]
+            self.actualizar_usuarios(usuarios)
+
+        elif msg.startswith("<msg>"):
+            payload = msg.removeprefix("<msg>")
+
+            if "|" in payload:
+                remitente, contenido = payload.split("|", 1)
+                remitente = remitente.strip()
+
+                from datetime import datetime
+                fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                self.mensage_entrante(
+                    f"[{fecha}] {remitente}: {contenido}\n"
+                )
+
+        elif msg.startswith("<historial_data>"):
+            payload = msg.removeprefix("<historial_data>").strip()
+            self.mostrar_historial(payload)
+
+        elif msg.startswith("<historial>") and msg.endswith("</historial>"):
+            payload = msg.removeprefix("<historial>")[:-12].strip()
+            self.mostrar_historial(payload)
+
+        else:
+            self.mensage_entrante(msg + "\n")
+
 
 
 class MiDialogo(QDialog, Ui_Dialog):

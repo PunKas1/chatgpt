@@ -129,10 +129,11 @@ def guardarMensajeUnoAUno(remitente: str, destinatario: str, contenido: str) -> 
         # 2. Insertar usando solo id_remitente e id_destinatario
         cursor.execute(
             """
-            INSERT INTO Mensajes (id_remitente, id_destinatario, contenido, fecha_envio)
-            VALUES (?, ?, ?, GETDATE())
+            INSERT INTO Mensajes
+            (id_usuario, id_remitente, id_destinatario, contenido, fecha_envio)
+            VALUES (?, ?, ?, ?, GETDATE())
             """,
-            (id_remitente, id_destinatario, contenido),
+            (id_remitente, id_remitente, id_destinatario, contenido),
         )
         conn.commit()
         return True
