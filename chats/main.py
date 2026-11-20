@@ -6,6 +6,7 @@ from uis.iniciarSesion_ui import Ui_Form
 from uis.principal_ui import Ui_Messenger  # Si principal es QWidget, cambia QMainWindow por QWidget
 
 
+
 class VentanaLogin(QWidget, Ui_Form):
 
     def __init__(self):
@@ -100,4 +101,3 @@ if __name__ == "__main__":
     login.show()
     sys.exit(app.exec())
 
-    

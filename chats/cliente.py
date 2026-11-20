@@ -74,7 +74,7 @@ class VentanaLogin(QWidget, Ui_Form):
         self.setupUi(self)
         self.ventana_principal = None
 
-        # Conectar botones de iniciarSesion.ui
+  
         self.bton_login.clicked.connect(self.iniciar_sesion)
         self.bton_crear.clicked.connect(self.crear_cuenta)
 

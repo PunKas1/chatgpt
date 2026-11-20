@@ -120,6 +120,7 @@ def broadcast(message: str, connection):
 
 def remove(target):
     removed = False
+
     with clients_lock:
         for client in list(list_of_clients):
             if client is target or client.conn == target:
