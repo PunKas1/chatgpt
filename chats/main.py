@@ -1,38 +1,26 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget
-
-from chats.cliente import ClienteChat
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from chats.cliente import MainWindow
 from dbs import mssql
 from uis.iniciarSesion_ui import Ui_Form
-from uis.principal_ui import Ui_MainWindow  # Si principal es QWidget, cambia QMainWindow por QWidget
+from uis.principal_ui import Ui_Messenger  # Si principal es QWidget, cambia QMainWindow por QWidget
 
 
-class VentanaPrincipal(QMainWindow):
-
-    def __init__(self, id_usuario, nombre_usuario, cliente_socket):
-        super().__init__()
-        self.ui = Ui_MainWindow()
-        self.ui.setupUi(self)
-        self.id_usuario = id_usuario
-        self.nombre_usuario = nombre_usuario
-        self.cliente = cliente_socket
-
-
-class VentanaLogin(QWidget):
+class VentanaLogin(QWidget, Ui_Form):
 
     def __init__(self):
         super().__init__()
-        self.ui = Ui_Form()
-        self.ui.setupUi(self)
-        self.cliente = ClienteChat()
+        self.setupUi(self)
+        self.ventana_principal = None
 
-        # Conectar botones
-        self.ui.btn_crear.clicked.connect(self.manejar_crear_cuenta)
-        self.ui.btn_login.clicked.connect(self.manejar_login)
+        # Revisa los nombres de botones según tu iniciarSesion_ui.py
+        # (en tu versión anterior eran bton_login / bton_crear)
+        self.bton_login.clicked.connect(self.iniciar_sesion)
+        self.bton_crear.clicked.connect(self.crear_cuenta)
 
-    def manejar_crear_cuenta(self):
-        usuario = self.ui.lineEdit.text().strip()
-        contrasena = self.ui.lineEdit_2.text().strip()
+    def crear_cuenta(self):
+        usuario = self.lineEdit.text().strip()
+        contrasena = self.lineEdit_2.text().strip()
 
         if not usuario or not contrasena:
             QMessageBox.warning(
@@ -54,11 +42,11 @@ class VentanaLogin(QWidget):
                 self, "Error de BD", f"No se pudo crear la cuenta:\n{e}"
             )
 
-    def manejar_login(self):
-        usuario = self.ui.lineEdit.text().strip()
-        contrasena = self.ui.lineEdit_2.text().strip()
-        ip = self.ui.lineEdit_3.text().strip()
-        puerto = self.ui.lineEdit_4.text().strip()
+    def iniciar_sesion(self):
+        usuario = self.lineEdit.text().strip()
+        contrasena = self.lineEdit_2.text().strip()
+        ip = self.lineEdit_3.text().strip()
+        puerto = self.lineEdit_4.text().strip()
 
         if not all([usuario, contrasena, ip, puerto]):
             QMessageBox.warning(
@@ -75,7 +63,6 @@ class VentanaLogin(QWidget):
             return
 
         try:
-            # 1. Verificar usuario y recuperar (id_usuario, nombre_usuario)
             datos_usuario = mssql.autenticar_usuario(usuario, contrasena)
             if not datos_usuario:
                 QMessageBox.warning(
@@ -87,16 +74,14 @@ class VentanaLogin(QWidget):
 
             id_usuario, nombre_usuario = datos_usuario
 
-            # 2. Conectar al server y notificar la conexión
-            self.cliente.conectar_y_notificar(
-                ip, puerto, id_usuario, nombre_usuario
+            # Abre MainWindow (de chats/cliente.py) y conecta el socket
+            self.ventana_principal = MainWindow(
+                user_id=id_usuario,
+                user_name=nombre_usuario,
+                host=ip,
+                port=int(puerto),
             )
-
-            # 3. Abrir ventana principal del chat y cerrar el login
-            self.ventana_chat = VentanaPrincipal(
-                id_usuario, nombre_usuario, self.cliente
-            )
-            self.ventana_chat.show()
+            self.ventana_principal.show()
             self.close()
 
         except ConnectionRefusedError:

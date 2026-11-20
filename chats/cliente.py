@@ -1,19 +1,17 @@
-from PySide6.QtWidgets import QMainWindow, QDialog, QApplication
-from PySide6.QtCore import QModelIndex, Qt
-from PySide6.QtGui import QStandardItemModel, QStandardItem
 import json
-from uis.principal_ui import *
-from uis.conectar_ui import *
-from PySide6.QtCore import QThread, Signal
-import sys
 import socket
 import sys
 
-# Permite importar 'uis' y 'dbs' al ejecutar cliente.py directamente desde VS Code
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from PySide6.QtCore import QModelIndex, Qt, QThread, Signal
+from PySide6.QtGui import QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QMainWindow,
+    QMessageBox,
+    QWidget,
+)
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QApplication, QDialog, QMainWindow, QMessageBox, QWidget
 from dbs import mssql
 from uis.conectar_ui import *
 from uis.iniciarSesion_ui import *
@@ -27,20 +25,21 @@ connected = False
 class ThreadSocket(QThread):
     signal_message = Signal(str)
 
-    def __init__(self, sock, host, port, name):
-        global connected
+    def __init__(self, host, port, user_id, name):
+        global connected, server
         super().__init__()
-        self.sock = sock
-        self.sock.connect((host, port))
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.connect((host, port))
         connected = True
-        self.sock.sendall(f"<name>{name}\n".encode("utf-8"))
+        # Envía el ID y el nombre al servidor para notificar la conexión
+        server.sendall(f"<name>{user_id}|{name}\n".encode("utf-8"))
 
     def run(self):
-        global connected
+        global connected, server
         buffer = ""
         try:
             while connected:
-                chunk = self.sock.recv(BUFFER_SIZE)
+                chunk = server.recv(BUFFER_SIZE)
                 if not chunk:
                     self.signal_message.emit("<!!disconected!!>")
                     break
@@ -52,17 +51,16 @@ class ThreadSocket(QThread):
                     linea = linea.strip()
                     if linea:
                         self.signal_message.emit(linea)
-
         except Exception:
             self.signal_message.emit("<!!error!!>")
         finally:
-            try:
-                self.sock.close()
-            except OSError:
-                pass
+            if server:
+                try:
+                    server.close()
+                except OSError:
+                    pass
             connected = False
-        
-        
+
     def stop(self):
         global connected
         connected = False
@@ -180,59 +178,84 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.setupUi(self)
         self.user_id = user_id
         self.user_name = user_name
+        self.usuario_activo = None
         self.actionConectar.triggered.connect(self.showDialog)
         self.actionSalir.triggered.connect(self.salir)
         self.coneccion = None
         self.btnSend.clicked.connect(self.mensaje_saliente)
         self.setWindowTitle("Messenger - Desconectado")
         self.txtSend.returnPressed.connect(self.mensaje_saliente)
+
         self.modelo_chats = QStandardItemModel()
         self.listaChats.setModel(self.modelo_chats)
-        self.actualizar_usuarios(["Ana", "Luis", "Sofía"])
         self.listaChats.clicked.connect(self.user_seleccionado)
 
-        
+        # Conecta automáticamente con los datos ingresados en el login
+        if host and port and user_name:
+            self.conectar_servidor(host, port, user_id, user_name)
+
+    def conectar_servidor(self, host, port, user_id, user_name):
+        self.coneccion = ThreadSocket(host, port, user_id, user_name)
+        self.coneccion.signal_message.connect(self.procesar_mensaje)
+        self.coneccion.start()
+        self.setWindowTitle(f"Messenger - Conectado ({user_name})")
+
     def mensaje_saliente(self):
         texto = self.txtSend.text().strip()
-        if texto and connected and getattr(self, "sock", None):
-            self.sock.sendall(f"{texto}\n".encode("utf-8"))
+        if texto and connected and server:
+            server.sendall(f"{texto}\n".encode("utf-8"))
             self.txtSend.clear()
-            self.mensage_entrante(f"<Tú> {texto}")
-            
-        
+            self.mensage_entrante(f"<Tú> {texto}\n")
+
     def salir(self):
         if self.coneccion:
             self.coneccion.stop()
-        exit()
+        sys.exit()
 
     def showDialog(self):
         dialog = MiDialogo(self)
         resp = dialog.exec()
         if resp == 1:
             host = dialog.txtServer.text().strip()
-            user = dialog.txtUser.text().strip()
+            user = dialog.txtUser.text().strip() or self.user_name
             port = dialog.txtPort.text().strip()
             if host and port and port.isnumeric():
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock = sock
-                self.coneccion = ThreadSocket(sock, host, int(port), user)
-                self.coneccion.signal_message.connect(self.mensage_entrante)
-                self.coneccion.start()
-                self.setWindowTitle(f"Messenger - Conectado ({user})")
-            
+                self.conectar_servidor(host, int(port), self.user_id, user)
+
+    def procesar_mensaje(self, msg: str):
+        if msg.startswith("<users>"):
+            contenido = msg.removeprefix("<users>")
+            if contenido.endswith("</users>"):
+                contenido = contenido[:-8]
+            usuarios = [u.strip() for u in contenido.split(",") if u.strip()]
+            self.actualizar_usuarios(usuarios)
+
+        elif msg.startswith("<historial_data>"):
+            payload = msg.removeprefix("<historial_data>").strip()
+            self.mostrar_historial(payload)
+
+        elif msg.startswith("<historial>") and msg.endswith("</historial>"):
+            payload = msg.removeprefix("<historial>")[:-12].strip()
+            self.mostrar_historial(payload)
+
+        else:
+            self.mensage_entrante(msg + "\n")
+
     def mensage_entrante(self, mensaje):
         self.txtMsgs.setPlainText(self.txtMsgs.toPlainText() + mensaje)
-        self.txtMsgs.verticalScrollBar().setValue(self.txtMsgs.verticalScrollBar().maximum())
+        self.txtMsgs.verticalScrollBar().setValue(
+            self.txtMsgs.verticalScrollBar().maximum()
+        )
 
-    def mostrar_historial(self, raw_data:str):
+    def mostrar_historial(self, raw_data: str):
         try:
-            data=json.loads(raw_data.strip())
+            data = json.loads(raw_data.strip())
         except json.JSONDecodeError:
             self.txtMsgs.appendPlainText("Error al obtener historial")
             return
 
-        con_usuario=data.get("con_usuario")
-        mensajes=data.get("mensajes",[])
+        con_usuario = data.get("con_usuario")
+        mensajes = data.get("mensajes", [])
 
         if getattr(self, "usuario_activo", None) and con_usuario != self.usuario_activo:
             return
@@ -240,7 +263,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.txtMsgs.clear()
 
         if not mensajes:
-            self.txtMsgs.appendPlainText(f"no hay mensajes previos con {con_usuario}")
+            self.txtMsgs.appendPlainText(f"No hay mensajes previos con {con_usuario}")
             return
 
         for msg in mensajes:
@@ -254,15 +277,16 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 linea = f"{remitente}: {contenido}"
 
             self.txtMsgs.appendPlainText(linea)
+
         scrollbar = self.txtMsgs.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     def actualizar_usuarios(self, usuarios: list[str]):
         self.modelo_chats.clear()
         for usuario in usuarios:
-            usuario =usuario.strip()
+            usuario = usuario.strip()
             if usuario:
-                item= QStandardItem(usuario)
+                item = QStandardItem(usuario)
                 item.setEditable(False)
                 item.setData(usuario, Qt.ItemDataRole.UserRole)
                 self.modelo_chats.appendRow(item)
@@ -276,11 +300,12 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.txtSend.setPlaceholderText(f"Mensaje a {usuario}...")
         self.txtSend.setFocus()
 
-        if connected and getattr(self, "sock", None):
+        if connected and server:
             try:
-                self.sock.sendall(f"<historial>{usuario}\n".encode("utf-8"))
+                server.sendall(f"<historial>{usuario}\n".encode("utf-8"))
             except OSError as e:
-                self.mensage_entrante(f"[Error al pedir historial: {e}]")
+                self.mensage_entrante(f"[Error al pedir historial: {e}]\n")
+
 
 class MiDialogo(QDialog, Ui_Dialog):
 
@@ -288,13 +313,11 @@ class MiDialogo(QDialog, Ui_Dialog):
         super().__init__(parent)
         self.setupUi(self)
 
-
-BUFFER_SIZE = 1024
-connected = False
+"""
 if __name__ == "__main__":
-    # Usamos un número pequeño para tener una respuesta rápida
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     app = QApplication(sys.argv)
     login = VentanaLogin()
     login.show()
     sys.exit(app.exec())
+
+"""
