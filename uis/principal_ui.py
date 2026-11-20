@@ -1,75 +1,239 @@
 # -*- coding: utf-8 -*-
 
-################################################################################
-## Form generated from reading UI file 'principal.ui'
-##
-## Created by: Qt User Interface Compiler version 6.12.0
-##
-## WARNING! All changes made in this file will be lost when recompiling UI file!
-################################################################################
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, Qt
+from PySide6.QtGui import QAction, QFont
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListView,
+    QMenu,
+    QMenuBar,
+    QPushButton,
+    QSizePolicy,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
-    QCursor, QFont, QFontDatabase, QGradient,
-    QIcon, QImage, QKeySequence, QLinearGradient,
-    QPainter, QPalette, QPixmap, QRadialGradient,
-    QTransform)
-from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QLineEdit,
-    QListView, QMainWindow, QMenu, QMenuBar,
-    QPlainTextEdit, QPushButton, QSizePolicy, QWidget)
 
 class Ui_Messenger(object):
     def setupUi(self, Messenger):
         if not Messenger.objectName():
-            Messenger.setObjectName(u"Messenger")
-        Messenger.resize(493, 414)
+            Messenger.setObjectName("Messenger")
+        Messenger.resize(820, 540)
+        Messenger.setStyleSheet("""
+            QMainWindow, #centralwidget {
+                background-color: #121214;
+                color: #ffffff;
+                font-family: "Segoe UI";
+            }
+            QLabel#lblUserConectado {
+                background-color: #1e1e22;
+                border: 1px solid #2e2e34;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-weight: bold;
+                font-size: 13px;
+                color: #4ade80;
+            }
+            QLabel#lblIndicadorChat {
+                background-color: #1e1e22;
+                border: 1px solid #2e2e34;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-weight: bold;
+                font-size: 14px;
+                color: #60a5fa;
+            }
+            QPushButton.tabBtn {
+                background-color: #1e1e22;
+                color: #a1a1aa;
+                border: 1px solid #2e2e34;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton.tabBtn:hover {
+                background-color: #27272a;
+                color: #ffffff;
+            }
+            QPushButton.tabBtn[active="true"] {
+                background-color: #2563eb;
+                color: #ffffff;
+                border: 1px solid #3b82f6;
+            }
+            QListView#listaChats {
+                background-color: #18181b;
+                border: 1px solid #2e2e34;
+                border-radius: 8px;
+                padding: 4px;
+                color: #f4f4f5;
+                font-size: 13px;
+                outline: none;
+            }
+            QListView#listaChats::item {
+                padding: 8px 10px;
+                border-radius: 6px;
+            }
+            QListView#listaChats::item:selected {
+                background-color: #2563eb;
+                color: #ffffff;
+            }
+            QListView#listaChats::item:hover:!selected {
+                background-color: #27272a;
+            }
+            QTextBrowser#txtMsgs {
+                background-color: #18181b;
+                border: 1px solid #2e2e34;
+                border-radius: 8px;
+                padding: 8px;
+                color: #ffffff;
+                font-size: 13px;
+            }
+            QLineEdit#txtSend {
+                background-color: #1e1e22;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                padding: 8px 12px;
+                color: #ffffff;
+                font-size: 13px;
+            }
+            QLineEdit#txtSend:focus {
+                border: 1px solid #3b82f6;
+            }
+            QPushButton#btnSend {
+                background-color: #2563eb;
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 18px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton#btnSend:hover {
+                background-color: #1d4ed8;
+            }
+            QMenuBar {
+                background-color: #18181b;
+                color: #e4e4e7;
+            }
+            QMenuBar::item:selected {
+                background-color: #27272a;
+            }
+            QMenu {
+                background-color: #1e1e22;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+            }
+            QMenu::item:selected {
+                background-color: #2563eb;
+            }
+        """)
+
         self.actionConectar = QAction(Messenger)
-        self.actionConectar.setObjectName(u"actionConectar")
+        self.actionConectar.setObjectName("actionConectar")
         self.actionSalir = QAction(Messenger)
-        self.actionSalir.setObjectName(u"actionSalir")
+        self.actionSalir.setObjectName("actionSalir")
         self.actionMis_Comunidades = QAction(Messenger)
-        self.actionMis_Comunidades.setObjectName(u"actionMis_Comunidades")
+        self.actionMis_Comunidades.setObjectName("actionMis_Comunidades")
         self.actionMas_Comunidades = QAction(Messenger)
-        self.actionMas_Comunidades.setObjectName(u"actionMas_Comunidades")
+        self.actionMas_Comunidades.setObjectName("actionMas_Comunidades")
+
         self.centralwidget = QWidget(Messenger)
-        self.centralwidget.setObjectName(u"centralwidget")
-        self.gridLayout = QGridLayout(self.centralwidget)
-        self.gridLayout.setObjectName(u"gridLayout")
+        self.centralwidget.setObjectName("centralwidget")
+
+        # Layout principal horizontal (Panel Izquierdo | Panel Derecho)
+        self.mainLayout = QHBoxLayout(self.centralwidget)
+        self.mainLayout.setContentsMargins(10, 10, 10, 10)
+        self.mainLayout.setSpacing(10)
+
+        # ================= PANEL IZQUIERDO =================
+        self.leftPanel = QVBoxLayout()
+        self.leftPanel.setSpacing(8)
+
+        # 1. User conectado
+        self.lblUserConectado = QLabel(self.centralwidget)
+        self.lblUserConectado.setObjectName("lblUserConectado")
+        self.leftPanel.addWidget(self.lblUserConectado)
+
+        # 2. Botones: Chats | Grupos | Canal
+        self.tabsLayout = QHBoxLayout()
+        self.tabsLayout.setSpacing(6)
+
+        self.btnChats = QPushButton(self.centralwidget)
+        self.btnChats.setObjectName("btnChats")
+        self.btnChats.setProperty("class", "tabBtn")
+        self.btnChats.setProperty("active", "true")
+
+        self.btnGrupos = QPushButton(self.centralwidget)
+        self.btnGrupos.setObjectName("btnGrupos")
+        self.btnGrupos.setProperty("class", "tabBtn")
+        self.btnGrupos.setProperty("active", "false")
+
+        self.btnCanal = QPushButton(self.centralwidget)
+        self.btnCanal.setObjectName("btnCanal")
+        self.btnCanal.setProperty("class", "tabBtn")
+        self.btnCanal.setProperty("active", "false")
+
+        self.tabsLayout.addWidget(self.btnChats)
+        self.tabsLayout.addWidget(self.btnGrupos)
+        self.tabsLayout.addWidget(self.btnCanal)
+        self.leftPanel.addLayout(self.tabsLayout)
+
+        # 3. Despliegue de cosas (listaChats)
+        self.listaChats = QListView(self.centralwidget)
+        self.listaChats.setObjectName("listaChats")
+        self.listaChats.setMinimumWidth(240)
+        self.leftPanel.addWidget(self.listaChats)
+
+        self.mainLayout.addLayout(self.leftPanel, 1)
+
+        # ================= PANEL DERECHO =================
+        self.rightPanel = QVBoxLayout()
+        self.rightPanel.setSpacing(8)
+
+        # 1. Indicador de chat
+        self.lblIndicadorChat = QLabel(self.centralwidget)
+        self.lblIndicadorChat.setObjectName("lblIndicadorChat")
+        self.rightPanel.addWidget(self.lblIndicadorChat)
+
+        # 2. Área de mensajes con burbujas HTML
+        self.txtMsgs = QTextBrowser(self.centralwidget)
+        self.txtMsgs.setObjectName("txtMsgs")
+        self.txtMsgs.setFrameShape(QFrame.Shape.Box)
+        self.txtMsgs.setOpenExternalLinks(False)
+        self.rightPanel.addWidget(self.txtMsgs)
+
+        # 3. Fila inferior: escribir + enviar
+        self.sendLayout = QHBoxLayout()
+        self.sendLayout.setSpacing(8)
+
         self.txtSend = QLineEdit(self.centralwidget)
-        self.txtSend.setObjectName(u"txtSend")
+        self.txtSend.setObjectName("txtSend")
         self.txtSend.setMaxLength(1023)
 
-        self.gridLayout.addWidget(self.txtSend, 1, 0, 1, 1)
-
         self.btnSend = QPushButton(self.centralwidget)
-        self.btnSend.setObjectName(u"btnSend")
+        self.btnSend.setObjectName("btnSend")
 
-        self.gridLayout.addWidget(self.btnSend, 1, 1, 1, 1)
+        self.sendLayout.addWidget(self.txtSend)
+        self.sendLayout.addWidget(self.btnSend)
+        self.rightPanel.addLayout(self.sendLayout)
 
-        self.txtMsgs = QPlainTextEdit(self.centralwidget)
-        self.txtMsgs.setObjectName(u"txtMsgs")
-        self.txtMsgs.setEnabled(True)
-        self.txtMsgs.setFrameShape(QFrame.Shape.Box)
-        self.txtMsgs.setFrameShadow(QFrame.Shadow.Raised)
-        self.txtMsgs.setReadOnly(True)
-
-        self.gridLayout.addWidget(self.txtMsgs, 0, 1, 1, 1)
-
-        self.listaChats = QListView(self.centralwidget)
-        self.listaChats.setObjectName(u"listaChats")
-
-        self.gridLayout.addWidget(self.listaChats, 0, 0, 1, 1)
+        self.mainLayout.addLayout(self.rightPanel, 2)
 
         Messenger.setCentralWidget(self.centralwidget)
+
+        # Menú superior
         self.menubar = QMenuBar(Messenger)
-        self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 493, 33))
+        self.menubar.setObjectName("menubar")
+        self.menubar.setGeometry(QRect(0, 0, 820, 28))
         self.menuArchivo = QMenu(self.menubar)
-        self.menuArchivo.setObjectName(u"menuArchivo")
+        self.menuArchivo.setObjectName("menuArchivo")
         self.menuComunidades = QMenu(self.menubar)
-        self.menuComunidades.setObjectName(u"menuComunidades")
+        self.menuComunidades.setObjectName("menuComunidades")
         Messenger.setMenuBar(self.menubar)
 
         self.menubar.addAction(self.menuArchivo.menuAction())
@@ -81,24 +245,54 @@ class Ui_Messenger(object):
         self.menuComunidades.addAction(self.actionMas_Comunidades)
 
         self.retranslateUi(Messenger)
-
         QMetaObject.connectSlotsByName(Messenger)
-    # setupUi
 
     def retranslateUi(self, Messenger):
-        Messenger.setWindowTitle(QCoreApplication.translate("Messenger", u"Messenger", None))
-        self.actionConectar.setText(QCoreApplication.translate("Messenger", u"Co&nectar", None))
-#if QT_CONFIG(shortcut)
-        self.actionConectar.setShortcut(QCoreApplication.translate("Messenger", u"Ctrl+C", None))
-#endif // QT_CONFIG(shortcut)
-        self.actionSalir.setText(QCoreApplication.translate("Messenger", u"&Salir", None))
-#if QT_CONFIG(shortcut)
-        self.actionSalir.setShortcut(QCoreApplication.translate("Messenger", u"Ctrl+X", None))
-#endif // QT_CONFIG(shortcut)
-        self.actionMis_Comunidades.setText(QCoreApplication.translate("Messenger", u"Mis Comunidades", None))
-        self.actionMas_Comunidades.setText(QCoreApplication.translate("Messenger", u"Mas Comunidades", None))
-        self.btnSend.setText(QCoreApplication.translate("Messenger", u"Enviar", None))
-        self.menuArchivo.setTitle(QCoreApplication.translate("Messenger", u"&Archivo", None))
-        self.menuComunidades.setTitle(QCoreApplication.translate("Messenger", u"Comunidades", None))
-    # retranslateUi
-
+        Messenger.setWindowTitle(
+            QCoreApplication.translate("Messenger", "Messenger", None)
+        )
+        self.actionConectar.setText(
+            QCoreApplication.translate("Messenger", "Co&nectar", None)
+        )
+        self.actionConectar.setShortcut(
+            QCoreApplication.translate("Messenger", "Ctrl+C", None)
+        )
+        self.actionSalir.setText(
+            QCoreApplication.translate("Messenger", "&Salir", None)
+        )
+        self.actionSalir.setShortcut(
+            QCoreApplication.translate("Messenger", "Ctrl+X", None)
+        )
+        self.actionMis_Comunidades.setText(
+            QCoreApplication.translate("Messenger", "Mis Comunidades", None)
+        )
+        self.actionMas_Comunidades.setText(
+            QCoreApplication.translate("Messenger", "Mas Comunidades", None)
+        )
+        self.lblUserConectado.setText(
+            QCoreApplication.translate("Messenger", "User: Desconectado", None)
+        )
+        self.btnChats.setText(
+            QCoreApplication.translate("Messenger", "Chats", None)
+        )
+        self.btnGrupos.setText(
+            QCoreApplication.translate("Messenger", "Grupos", None)
+        )
+        self.btnCanal.setText(
+            QCoreApplication.translate("Messenger", "Canal", None)
+        )
+        self.lblIndicadorChat.setText(
+            QCoreApplication.translate("Messenger", "Chat actual: Global", None)
+        )
+        self.txtSend.setPlaceholderText(
+            QCoreApplication.translate("Messenger", "Escribe un mensaje en Global...", None)
+        )
+        self.btnSend.setText(
+            QCoreApplication.translate("Messenger", "Enviar", None)
+        )
+        self.menuArchivo.setTitle(
+            QCoreApplication.translate("Messenger", "&Archivo", None)
+        )
+        self.menuComunidades.setTitle(
+            QCoreApplication.translate("Messenger", "Comunidades", None)
+        )
