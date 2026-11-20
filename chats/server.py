@@ -2,7 +2,7 @@ import json
 import socket
 import threading
 
-from dbs.mssql import recuperarHistorialUnoAUno
+from dbs.mssql import recuperarHistorialUnoAUno, guardarMensajeUnoAUno
 
 BUFFER_SIZE = 1024
 clients_lock = threading.Lock()
@@ -28,6 +28,19 @@ def isUserConnected(user_id: str, name: str) -> bool:
                 return True
     return False
 
+def broadcast_connected_users():
+    users = ",".join(connected_users())
+    package = f"<users>{users}</users>\n".encode("utf-8")
+
+    with clients_lock:
+        targets = list(list_of_clients)
+
+    for client in targets:
+        try:
+            client.conn.sendall(package)
+        except OSError:
+            remove(client)
+
 
 def setName(connection, raw_payload: str) -> bool:
     datos = raw_payload.strip()
@@ -40,7 +53,7 @@ def setName(connection, raw_payload: str) -> bool:
 
     if isUserConnected(user_id, nombre):
         try:
-            connection.sendall("<!!duplicate!!\n".encode("utf-8"))
+            connection.sendall("<!!duplicate!!>\n".encode("utf-8"))
         except OSError:
             pass
         return False
@@ -127,18 +140,7 @@ def connected_users() -> list[str]:
         return [c.name for c in list_of_clients if c.name]
 
 
-def broadcast_connected_users():
-    users = ",".join(connected_users())
-    package = f"<users>{users}</users>\n".encode("utf-8")
 
-    with clients_lock:
-        targets = list(list_of_clients)
-
-    for client in targets:
-        try:
-            client.conn.sendall(package)
-        except OSError:
-            remove(client)
 
 
 def clientthread(conn, addr):
@@ -174,6 +176,35 @@ def clientthread(conn, addr):
                     cliente_actual = getCliente(conn)
                     if cliente_actual:
                         recuperarHistorial(cliente_actual, usuario_objetivo)
+                elif msg.startswith("<msg>"):
+                    payload = msg.removeprefix("<msg>")
+                    if "|" not in payload:
+                        continue
+                    destinatario, contenido = payload.split("|", 1)
+                    destinatario = destinatario.strip()
+                    contenido = contenido.strip()
+                    cliente_actual = getCliente(conn)
+                    if not cliente_actual or not cliente_actual.name or not contenido:
+                        continue
+                    guardarMensajeUnoAUno(
+                        remitente=cliente_actual.name,
+                        destinatario=destinatario,
+                        contenido=contenido,
+                    )
+
+                    with clients_lock:
+                        objetivo_conn = None
+                        for c in list_of_clients:
+                            if c.name.lower() == destinatario.lower():
+                                objetivo_conn = c.conn
+                                break
+
+                    if objetivo_conn:
+                        try:
+                            paquete = f"<msg>{cliente_actual.name}|{contenido}\n".encode("utf-8")
+                            objetivo_conn.sendall(paquete)
+                        except OSError:
+                            remove(objetivo_conn)
                 else:
                     remitente = getName(conn) or addr[0]
                     message_to_send = f"<{remitente}> {msg}\n"
@@ -186,7 +217,7 @@ def clientthread(conn, addr):
 
 if __name__ == "__main__":
     host = "0.0.0.0"
-    port = 80
+    port = 3061
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

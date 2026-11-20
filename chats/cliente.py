@@ -201,11 +201,18 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.setWindowTitle(f"Messenger - Conectado ({user_name})")
 
     def mensaje_saliente(self):
-        texto = self.txtSend.text().strip()
-        if texto and connected and server:
-            server.sendall(f"{texto}\n".encode("utf-8"))
+            texto = self.txtSend.text().strip()
+            if not texto or not connected or not server:
+                return
+
+            if not getattr(self, "usuario_activo", None):
+                self.mensage_entrante("[Selecciona un usuario de la lista de chats primero]\n")
+                return
+
+            paquete = f"<msg>{self.usuario_activo}|{texto}\n"
+            server.sendall(paquete.encode("utf-8"))
             self.txtSend.clear()
-            self.mensage_entrante(f"<Tú> {texto}\n")
+            self.mensage_entrante(f"<Tú -> {self.usuario_activo}> {texto}\n")
 
     def salir(self):
         if self.coneccion:
@@ -227,6 +234,15 @@ class MainWindow(QMainWindow, Ui_Messenger):
             contenido = msg.removeprefix("<users>")
             if contenido.endswith("</users>"):
                 contenido = contenido[:-8]
+            elif msg.startswith("<msg>"):
+                payload = msg.removeprefix("<msg>")
+                if "|" in payload:
+                    remitente, contenido = payload.split("|", 1)
+                    remitente = remitente.strip()
+                    if getattr(self, "usuario_activo", None) == remitente:
+                        self.mensage_entrante(f"<{remitente}> {contenido}\n")
+                    else:
+                        self.mensage_entrante(f"[Nuevo mensaje de {remitente}]: {contenido}\n")
             usuarios = [u.strip() for u in contenido.split(",") if u.strip()]
             self.actualizar_usuarios(usuarios)
 

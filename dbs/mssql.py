@@ -61,3 +61,87 @@ def recuperarHistorialUnoAUno(usuario_actual: str, usuario_objetivo: str,)->list
         })
 
     return historial
+
+
+def crear_usuario(nombre_usuario, contrasena):
+    conexion = obtener_conexion()
+    try:
+        cursor = conexion.cursor()
+        # Verificar si el usuario ya existe
+        cursor.execute(
+            "SELECT id_usuario FROM dbo.Usuarios WHERE nombre_usuario = ?",
+            (nombre_usuario,),
+        )
+        if cursor.fetchone():
+            return False
+
+        cursor.execute(
+            "INSERT INTO dbo.Usuarios (nombre_usuario, contrasena) VALUES (?, ?)",
+            (nombre_usuario, contrasena),
+        )
+        conexion.commit()
+        return True
+    finally:
+        conexion.close()
+
+def autenticar_usuario(nombre_usuario, contrasena):
+    """Retorna (id_usuario, nombre_usuario) si las credenciales son válidas, o None."""
+    conexion = obtener_conexion()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(
+            "SELECT id_usuario, nombre_usuario FROM dbo.Usuarios WHERE nombre_usuario = ? AND contrasena = ?",
+            (nombre_usuario, contrasena),
+        )
+        return cursor.fetchone()
+    finally:
+        conexion.close()
+
+def guardarMensajeUnoAUno(remitente: str, destinatario: str, contenido: str) -> bool:
+    conn = obtener_conexion()  # usa tu función actual de conexión a SQL Server
+    cursor = None
+    try:
+        cursor = conn.cursor()
+
+        # 1. Resolver id_remitente e id_destinatario desde la tabla de usuarios
+        cursor.execute(
+            """
+            SELECT id_usuario, nombre_usuario
+            FROM Usuarios
+            WHERE LOWER(nombre_usuario) IN (LOWER(?), LOWER(?))
+            """,
+            (remitente.strip(), destinatario.strip()),
+        )
+        filas = cursor.fetchall()
+
+        ids_por_nombre = {
+            row[1].strip().lower(): row[0] for row in filas
+        }
+        id_remitente = ids_por_nombre.get(remitente.strip().lower())
+        id_destinatario = ids_por_nombre.get(destinatario.strip().lower())
+
+        if not id_remitente or not id_destinatario:
+            print(
+                f"No se encontraron usuarios en BD: remitente={remitente}, destinatario={destinatario}"
+            )
+            return False
+
+        # 2. Insertar usando solo id_remitente e id_destinatario
+        cursor.execute(
+            """
+            INSERT INTO Mensajes (id_remitente, id_destinatario, contenido, fecha_envio)
+            VALUES (?, ?, ?, GETDATE())
+            """,
+            (id_remitente, id_destinatario, contenido),
+        )
+        conn.commit()
+        return True
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Error al guardar mensaje uno a uno en SQL Server: {e}")
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        conn.close()
