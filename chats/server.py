@@ -1,11 +1,13 @@
 import socket
 import threading
+import json
+from dbs.mssql import recuperarHistorialUnoAUno
 
 
 clients_lock = threading.Lock()
 
 class Cliente:
-    def __init__(self):
+    def __init__(self,conn, addr):
         self.name = ""
         self.conn = conn
         self.addr = addr
@@ -16,27 +18,35 @@ def clientthread(conn, addr):
     except OSError:
         pass
 
+    try:
         while True:
-                message = conn.recv(BUFFER_SIZE)
-                if not message:
-                        break
-                
-                print(f"<{addr[0]}> {message}")
-                msg = message.decode('utf-8')
-                # Mensajes especiales (comandos)
-                if msg.startswith('<name>'):
-                    setName(conn, msg.removeprefix('<name>'))
-                elif msg.startswith('<command>'):
-                    broadcast(msg + '\n', conn)
-                else:
-                    # Reenviamos el mensaje recibido a todos los demás clientes.
-                    message_to_send = f"<{getName(conn)}> {msg}\n"
-                    broadcast(message_to_send, conn)
+            message = conn.recv(BUFFER_SIZE)
+            if not message:
+                break
+
+            print(f"<{addr[0]}> {message}")
+            msg = message.decode('utf-8', errors='replace').strip()
+            if not msg:
+                continue
+
+            # Mensajes especiales (comandos)
+            if msg.startswith('<name>'):
+                setName(conn, msg.removeprefix('<name>').strip())
+            elif msg.startswith('<command>'):
+                broadcast(msg + '\n', conn)
+            elif msg.startswith('<historial>'):
+                usuario_objetivo = msg.removeprefix('<historial>').strip()
+                cliente_actual = getCliente(conn)
+                if cliente_actual:
+                    recuperarHistorial(cliente_actual, usuario_objetivo)
+            else:
+                # Reenviamos el mensaje recibido a todos los demás clientes.
+                message_to_send = f"<{getName(conn)}> {msg}\n"
+                broadcast(message_to_send, conn)
     except OSError:
         pass
     finally:
         remove(conn)
-
 
 def setName(connection, name:str):
     with clients_lock:
@@ -52,6 +62,19 @@ def getName(connection) -> str:
             if client.conn == connection:
                 return client.name
         return ""
+
+def recuperarHistorial(client, usuario_objetivo:str):
+    with clients_lock:
+        if  not client.name or not usuario_objetivo:
+            return
+
+        mensajes = recuperarHistorialUnoAUno(usuario_actual=client.name, 
+                                             usuario_objetivo = usuario_objetivo)
+        payload = json.dumps({
+            "con_usuario":usuario_objetivo,
+            "mensajes":mensajes
+        }, ensure_ascii=False)
+        client.conn.sendall(f"<historial_data>{payload}\n".encode('utf-8'))
 
 def broadcast(message, connection):
     with clients_lock:
@@ -86,11 +109,18 @@ def connected_users() -> list[str]:
 def broadcast_connected_users():
     users = ",".join(connected_users())
     package =f"<users>{users}</users>\n".encode('utf-8')
-    for client in list_of_clients:
+    for client in list(list_of_clients):
         try:
             client.conn.sendall(package)
         except OSError:
             remove(client)
+
+def getCliente(connection):
+    with clients_lock:
+        for client in list_of_clients:
+            if client.conn == connection:
+                return client
+        return None
 
 
 
@@ -110,7 +140,7 @@ if __name__ == "__main__":
     try:
         while True:
             conn, addr = server.accept()
-            nuevo_cliente = Cliente()
+            nuevo_cliente = Cliente(conn, addr)
             nuevo_cliente.conn = conn
             nuevo_cliente.addr = addr
             #list_of_clients.append(conn)  # Agregamos a la lista de clientes
