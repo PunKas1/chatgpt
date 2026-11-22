@@ -1,189 +1,255 @@
 # -*- coding: utf-8 -*-
 
-################################################################################
-## Form generated from reading UI file 'iniciarSesion.ui'
-##
-## Created by: Qt User Interface Compiler version 6.12.0
-##
-## WARNING! All changes made in this file will be lost when recompiling UI file!
-################################################################################
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize, Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QWidget,
+)
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QLabel,
-    QLineEdit, QPushButton, QSizePolicy, QWidget)
 
 class Ui_Form(object):
     def setupUi(self, Form):
         if not Form.objectName():
-            Form.setObjectName(u"Form")
-        Form.resize(478, 578)
+            Form.setObjectName("Form")
+        Form.resize(500, 580)
+        Form.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        Form.setStyleSheet("""
+            /* Fondo general de la ventana (mismo tono que principal_ui) */
+            QWidget#Form {
+                background-color: #121214;
+                color: #ffffff;
+                font-family: "Segoe UI";
+            }
+
+            /* Tarjeta central */
+            QFrame#card_login {
+                background-color: #18181b;
+                border: 1px solid #2e2e34;
+                border-radius: 14px;
+            }
+
+            /* Estilo base para etiquetas */
+            QLabel {
+                color: #e4e4e7;
+                font-family: "Segoe UI";
+                font-size: 13px;
+                background: transparent;
+            }
+
+            /* Título principal */
+            QLabel#label_4 {
+                color: #ffffff;
+                font-family: "Segoe UI";
+                font-size: 28px;
+                font-weight: bold;
+            }
+
+            /* Subtítulo */
+            QLabel#label_7 {
+                color: #60a5fa;
+                font-family: "Segoe UI";
+                font-size: 16px;
+                font-weight: bold;
+            }
+
+            /* Etiquetas de los campos */
+            QLabel#label_2, QLabel#label_3, QLabel#label_5, QLabel#label_6 {
+                color: #a1a1aa;
+                font-family: "Segoe UI";
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            /* Cajas de texto */
+            QLineEdit {
+                background-color: #1e1e22;
+                color: #ffffff;
+                font-family: "Segoe UI";
+                font-size: 13px;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }
+
+            QLineEdit:focus {
+                border: 1px solid #3b82f6;
+                background-color: #222227;
+            }
+
+            /* Botón principal (Iniciar sesión) */
+            QPushButton#bton_login {
+                background-color: #2563eb;
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-family: "Segoe UI";
+                font-size: 13px;
+                font-weight: bold;
+            }
+
+            QPushButton#bton_login:hover {
+                background-color: #1d4ed8;
+            }
+
+            QPushButton#bton_login:pressed {
+                background-color: #1e40af;
+            }
+
+            /* Botón secundario (Crear cuenta) */
+            QPushButton#bton_crear {
+                background-color: #1e1e22;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-family: "Segoe UI";
+                font-size: 13px;
+                font-weight: bold;
+            }
+
+            QPushButton#bton_crear:hover {
+                background-color: #27272a;
+                color: #ffffff;
+            }
+
+            QPushButton#bton_crear:pressed {
+                background-color: #3f3f46;
+            }
+        """)
+
         self.gridLayout = QGridLayout(Form)
-        self.gridLayout.setObjectName(u"gridLayout")
+        self.gridLayout.setObjectName("gridLayout")
+        self.gridLayout.setContentsMargins(16, 16, 16, 16)
+
         self.card_login = QFrame(Form)
-        self.card_login.setObjectName(u"card_login")
-        self.card_login.setMinimumSize(QSize(460, 560))
-        self.card_login.setMaximumSize(QSize(460, 560))
-        self.card_login.setStyleSheet(u"/* Fondo general de la ventana */\n"
-"#Form {\n"
-"    background-color: rgb(2, 34, 5);\n"
-"}\n"
-"\n"
-"/* Tarjeta central con bordes redondos y borde sutil */\n"
-"#card_login {\n"
-"    background-color: rgb(39, 39, 39);\n"
-"    border: 1px solid #27272a;\n"
-"    border-radius: 16px;\n"
-"    padding: 24px;\n"
-"}\n"
-"\n"
-"/* Estilo base para cualquier QLabel nuevo (evita texto negro invisible) */\n"
-"QLabel {\n"
-"    color: #ffffff;\n"
-"    font-family: \"Segoe UI\";\n"
-"    font-size: 14px;\n"
-"}\n"
-"\n"
-"/* T\u00edtulo principal */\n"
-"#label_4 {\n"
-"    color: #ffffff;\n"
-"    font-family: \"Comic Sans MS\";\n"
-"    font-size: 35px; \n"
-"    font-weight: bold;\n"
-"}\n"
-"\n"
-"#label_7{\n"
-"	color: rgb(13, 104, 223);\n"
-"    font-family: \"Comic Sans MS\";\n"
-"    font-size: 25px; \n"
-"    font-weight: bold;\n"
-"}\n"
-"\n"
-"/* Etiquetas de campos (con el guion bajo que asigna Qt Designer) */\n"
-"#label_2, #label_3, #label_5, #label_6{\n"
-"    color: #ffffff;\n"
-"    font-family: \"Comic Sans MS\";\n"
-"    font-si"
-                        "ze: 16px;\n"
-"    font-weight: normal;\n"
-"}\n"
-"QLineEdit {\n"
-"    background-color: rgb(29, 29, 29);\n"
-"    color: rgb(255, 255, 255);\n"
-"    font-family: \"Comic Sans MS\";\n"
-"    font-size: 10px;\n"
-"    border: 1px solid rgb(60, 60, 60);\n"
-"    border-radius: 6px;\n"
-"    padding: 4px 8px;\n"
-"}\n"
-"\n"
-"\n"
-"#bton_login {\n"
-"    background-color: #ffffff;\n"
-"    color: #09090b;\n"
-"    border: none;\n"
-"    border-radius: 8px;\n"
-"    padding: 10px 18px;\n"
-"    font-family: \"Segoe UI\";\n"
-"    font-size: 13px;\n"
-"    font-weight: bold;\n"
-"}\n"
-"\n"
-"#bton_login:hover {\n"
-"    background-color: #e4e4e7;\n"
-"}\n"
-"\n"
-"/* Bot\u00f3n secundario oscuro con borde */\n"
-"#bton_crear {\n"
-"    background-color: #1e1e22;\n"
-"    color: #ffffff;\n"
-"    border: 1px solid #3f3f46;\n"
-"    border-radius: 8px;\n"
-"    padding: 10px 18px;\n"
-"    font-family: \"Segoe UI\";\n"
-"    font-size: 13px;\n"
-"    font-weight: bold;\n"
-"}\n"
-"\n"
-"#bton_crear:hover {\n"
-"    background-color: #27272a;\n"
-"}")
+        self.card_login.setObjectName("card_login")
+        self.card_login.setMinimumSize(QSize(440, 520))
+        self.card_login.setMaximumSize(QSize(440, 520))
         self.card_login.setFrameShape(QFrame.Shape.StyledPanel)
         self.card_login.setFrameShadow(QFrame.Shadow.Raised)
-        self.lineEdit = QLineEdit(self.card_login)
-        self.lineEdit.setObjectName(u"lineEdit")
-        self.lineEdit.setGeometry(QRect(130, 170, 201, 41))
-        self.lineEdit_2 = QLineEdit(self.card_login)
-        self.lineEdit_2.setObjectName(u"lineEdit_2")
-        self.lineEdit_2.setGeometry(QRect(130, 240, 201, 41))
-        self.bton_login = QPushButton(self.card_login)
-        self.bton_login.setObjectName(u"bton_login")
-        self.bton_login.setGeometry(QRect(100, 460, 121, 41))
-        self.bton_crear = QPushButton(self.card_login)
-        self.bton_crear.setObjectName(u"bton_crear")
-        self.bton_crear.setGeometry(QRect(240, 460, 121, 41))
-        self.label_2 = QLabel(self.card_login)
-        self.label_2.setObjectName(u"label_2")
-        self.label_2.setGeometry(QRect(130, 150, 101, 16))
-        self.label_3 = QLabel(self.card_login)
-        self.label_3.setObjectName(u"label_3")
-        self.label_3.setGeometry(QRect(130, 220, 111, 16))
+
+        # Título y subtítulo
         self.label_4 = QLabel(self.card_login)
-        self.label_4.setObjectName(u"label_4")
-        self.label_4.setGeometry(QRect(60, 20, 341, 61))
+        self.label_4.setObjectName("label_4")
+        self.label_4.setGeometry(QRect(30, 24, 380, 42))
         font = QFont()
-        font.setFamilies([u"Comic Sans MS"])
+        font.setFamilies(["Segoe UI"])
         font.setBold(True)
         self.label_4.setFont(font)
         self.label_4.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_5 = QLabel(self.card_login)
-        self.label_5.setObjectName(u"label_5")
-        self.label_5.setGeometry(QRect(130, 290, 121, 16))
-        self.lineEdit_3 = QLineEdit(self.card_login)
-        self.lineEdit_3.setObjectName(u"lineEdit_3")
-        self.lineEdit_3.setGeometry(QRect(130, 310, 201, 41))
-        self.label_6 = QLabel(self.card_login)
-        self.label_6.setObjectName(u"label_6")
-        self.label_6.setGeometry(QRect(130, 360, 111, 16))
-        self.lineEdit_4 = QLineEdit(self.card_login)
-        self.lineEdit_4.setObjectName(u"lineEdit_4")
-        self.lineEdit_4.setGeometry(QRect(130, 380, 201, 41))
+
         self.label_7 = QLabel(self.card_login)
-        self.label_7.setObjectName(u"label_7")
-        self.label_7.setGeometry(QRect(60, 70, 341, 61))
+        self.label_7.setObjectName("label_7")
+        self.label_7.setGeometry(QRect(30, 68, 380, 28))
         self.label_7.setFont(font)
         self.label_7.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # Usuario
+        self.label_2 = QLabel(self.card_login)
+        self.label_2.setObjectName("label_2")
+        self.label_2.setGeometry(QRect(80, 118, 280, 18))
+
+        self.lineEdit = QLineEdit(self.card_login)
+        self.lineEdit.setObjectName("lineEdit")
+        self.lineEdit.setGeometry(QRect(80, 140, 280, 38))
+
+        # Contraseña
+        self.label_3 = QLabel(self.card_login)
+        self.label_3.setObjectName("label_3")
+        self.label_3.setGeometry(QRect(80, 190, 280, 18))
+
+        self.lineEdit_2 = QLineEdit(self.card_login)
+        self.lineEdit_2.setObjectName("lineEdit_2")
+        self.lineEdit_2.setGeometry(QRect(80, 212, 280, 38))
+        self.lineEdit_2.setEchoMode(QLineEdit.EchoMode.Password)
+
+        # IP del Servidor
+        self.label_5 = QLabel(self.card_login)
+        self.label_5.setObjectName("label_5")
+        self.label_5.setGeometry(QRect(80, 262, 280, 18))
+
+        self.lineEdit_3 = QLineEdit(self.card_login)
+        self.lineEdit_3.setObjectName("lineEdit_3")
+        self.lineEdit_3.setGeometry(QRect(80, 284, 280, 38))
+
+        # Puerto
+        self.label_6 = QLabel(self.card_login)
+        self.label_6.setObjectName("label_6")
+        self.label_6.setGeometry(QRect(80, 334, 280, 18))
+
+        self.lineEdit_4 = QLineEdit(self.card_login)
+        self.lineEdit_4.setObjectName("lineEdit_4")
+        self.lineEdit_4.setGeometry(QRect(80, 356, 280, 38))
+
+        # Botones alineados al ancho de los campos (280 px en total)
+        self.bton_login = QPushButton(self.card_login)
+        self.bton_login.setObjectName("bton_login")
+        self.bton_login.setGeometry(QRect(80, 424, 134, 42))
+
+        self.bton_crear = QPushButton(self.card_login)
+        self.bton_crear.setObjectName("bton_crear")
+        self.bton_crear.setGeometry(QRect(226, 424, 134, 42))
+
         self.gridLayout.addWidget(self.card_login, 0, 0, 1, 1)
 
-
         self.retranslateUi(Form)
-
         QMetaObject.connectSlotsByName(Form)
-    # setupUi
 
     def retranslateUi(self, Form):
-        Form.setWindowTitle(QCoreApplication.translate("Form", u"Form", None))
-        self.lineEdit.setText("")
-        self.lineEdit.setPlaceholderText(QCoreApplication.translate("Form", u"EjemUser", None))
-        self.lineEdit_2.setText("")
-        self.lineEdit_2.setPlaceholderText(QCoreApplication.translate("Form", u"Password", None))
-        self.bton_login.setText(QCoreApplication.translate("Form", u"Iniciar sesi\u00f3n", None))
-        self.bton_crear.setText(QCoreApplication.translate("Form", u"Crear cuenta", None))
-        self.label_2.setText(QCoreApplication.translate("Form", u"Usuario:", None))
-        self.label_3.setText(QCoreApplication.translate("Form", u"Contrase\u00f1a:", None))
-        self.label_4.setText(QCoreApplication.translate("Form", u"Chat de Gpt", None))
-        self.label_5.setText(QCoreApplication.translate("Form", u"IP del Servidor:", None))
-        self.lineEdit_3.setText("")
-        self.lineEdit_3.setPlaceholderText(QCoreApplication.translate("Form", u"0.000.000.0", None))
-        self.label_6.setText(QCoreApplication.translate("Form", u"Puerto:", None))
-        self.lineEdit_4.setText("")
-        self.lineEdit_4.setPlaceholderText(QCoreApplication.translate("Form", u"####", None))
-        self.label_7.setText(QCoreApplication.translate("Form", u"Inicio de Sesi\u00f3n", None))
-    # retranslateUi
+        Form.setWindowTitle(
+            QCoreApplication.translate("Form", "Messenger - Inicio de Sesión", None)
+        )
+        self.lineEdit.setPlaceholderText(
+            QCoreApplication.translate("Form", "Nombre de usuario", None)
+        )
+        self.lineEdit_2.setPlaceholderText(
+            QCoreApplication.translate("Form", "Contraseña", None)
+        )
+        self.bton_login.setText(
+            QCoreApplication.translate("Form", "Iniciar sesión", None)
+        )
+        self.bton_crear.setText(
+            QCoreApplication.translate("Form", "Crear cuenta", None)
+        )
+        self.label_2.setText(
+            QCoreApplication.translate("Form", "Usuario", None)
+        )
+        self.label_3.setText(
+            QCoreApplication.translate("Form", "Contraseña", None)
+        )
+        self.label_4.setText(
+            QCoreApplication.translate("Form", "Messenger", None)
+        )
+        self.label_5.setText(
+            QCoreApplication.translate("Form", "IP del Servidor", None)
+        )
+        self.lineEdit_3.setPlaceholderText(
+            QCoreApplication.translate("Form", "Ej. 127.0.0.1", None)
+        )
+        self.label_6.setText(
+            QCoreApplication.translate("Form", "Puerto", None)
+        )
+        self.lineEdit_4.setPlaceholderText(
+            QCoreApplication.translate("Form", "Ej. 3061", None)
+        )
+        self.label_7.setText(
+            QCoreApplication.translate("Form", "Inicio de Sesión", None)
+        )
 
+
+if __name__ == "__main__":
+    import sys
+
+    app = QApplication(sys.argv)
+    Form = QWidget()
+    ui = Ui_Form()
+    ui.setupUi(Form)
+    Form.show()
+    sys.exit(app.exec())

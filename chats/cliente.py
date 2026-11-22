@@ -9,6 +9,7 @@ from PySide6.QtGui import QStandardItem, QStandardItemModel, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QWidget,
@@ -33,7 +34,6 @@ class ThreadSocket(QThread):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.connect((host, port))
         connected = True
-        # Envía el ID y el nombre al servidor para notificar la conexión
         server.sendall(f"<name>{user_id}|{name}\n".encode("utf-8"))
 
     def run(self):
@@ -64,8 +64,14 @@ class ThreadSocket(QThread):
             connected = False
 
     def stop(self):
-        global connected
+        global connected, server
         connected = False
+        if server:
+            try:
+                server.shutdown(socket.SHUT_RDWR)
+                server.close()
+            except OSError:
+                pass
         self.wait()
 
 
@@ -130,7 +136,6 @@ class VentanaLogin(QWidget, Ui_Form):
             return
 
         try:
-            # 1. Validar credenciales en SQL Server y recuperar (id_usuario, nombre_usuario)
             datos_usuario = mssql.autenticar_usuario(usuario, contrasena)
             if not datos_usuario:
                 QMessageBox.warning(
@@ -142,7 +147,6 @@ class VentanaLogin(QWidget, Ui_Form):
 
             id_usuario, nombre_usuario = datos_usuario
 
-            # 2. Abrir ventana principal y conectar el socket enviando ID y nombre
             self.ventana_principal = MainWindow(
                 user_id=id_usuario,
                 user_name=nombre_usuario,
@@ -179,20 +183,22 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.setupUi(self)
         self.user_id = user_id
         self.user_name = user_name
-        self.usuario_activo = "Global"  # Por defecto inicia en Global
+        self.usuario_activo = "Global"
+        self.grupo_activo_id = None
         self.categoria_actual = "chats"
         self.usuarios_conectados = []
-        self.grupos_disponibles = ["Grupo General", "Equipo Proyecto"]
+        self.todos_usuarios_bd = []
+        self.historial_global = []
+        self.grupos_disponibles = []
         self.canales_disponibles = ["Canal Anuncios", "Canal Dudas"]
 
-        self.actionConectar.triggered.connect(self.showDialog)
         self.actionSalir.triggered.connect(self.salir)
         self.coneccion = None
         self.btnSend.clicked.connect(self.mensaje_saliente)
         self.setWindowTitle("Messenger - Desconectado")
         self.txtSend.returnPressed.connect(self.mensaje_saliente)
 
-        # Conectar botones de pestañas (Chats | Grupos | Canal) si existen en el UI
+        # Pestañas superiores
         if hasattr(self, "btnChats"):
             self.btnChats.clicked.connect(lambda: self.cambiar_pestana("chats"))
         if hasattr(self, "btnGrupos"):
@@ -200,32 +206,51 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if hasattr(self, "btnCanal"):
             self.btnCanal.clicked.connect(lambda: self.cambiar_pestana("canal"))
 
+        # Botones del formulario de crear grupo
+        if hasattr(self, "btnCrearGrupo"):
+            self.btnCrearGrupo.clicked.connect(self.abrir_formulario_grupo)
+        if hasattr(self, "btnCancelarGrupo"):
+            self.btnCancelarGrupo.clicked.connect(self.cerrar_formulario_grupo)
+        if hasattr(self, "btnGuardarGrupo"):
+            self.btnGuardarGrupo.clicked.connect(self.confirmar_crear_grupo)
+
         self.modelo_chats = QStandardItemModel()
         self.listaChats.setModel(self.modelo_chats)
         self.listaChats.clicked.connect(self.user_seleccionado)
 
-        # Inicializar etiquetas superiores y lista por defecto en Global
         if hasattr(self, "lblUserConectado"):
-            etiqueta_user = f"Usuario: {user_name}" if user_name else "Usuario: Desconectado"
+            etiqueta_user = (
+                f"Usuario: {user_name}" if user_name else "Usuario: Desconectado"
+            )
             self.lblUserConectado.setText(etiqueta_user)
         if hasattr(self, "lblIndicadorChat"):
             self.lblIndicadorChat.setText("Chat actual: Global")
         self.txtSend.setPlaceholderText("Mensaje en Global...")
         self.refrescar_lista_actual()
 
-        # Conecta automáticamente con los datos ingresados en el login
         if host and port and user_name:
             self.conectar_servidor(host, port, user_id, user_name)
 
     def conectar_servidor(self, host, port, user_id, user_name):
         self.user_id = user_id
         self.user_name = user_name
+        self.cargar_usuarios_bd()
         self.coneccion = ThreadSocket(host, port, user_id, user_name)
         self.coneccion.signal_message.connect(self.procesar_mensaje)
         self.coneccion.start()
         self.setWindowTitle(f"Messenger - Conectado ({user_name})")
         if hasattr(self, "lblUserConectado"):
             self.lblUserConectado.setText(f"Usuario: {user_name}")
+        self.refrescar_lista_actual()
+
+    def cargar_usuarios_bd(self):
+        try:
+            self.todos_usuarios_bd = mssql.obtener_todos_los_usuarios()
+            if self.user_id is not None:
+                self.grupos_disponibles = mssql.obtener_grupos_usuario(self.user_id)
+        except Exception:
+            self.todos_usuarios_bd = []
+            self.grupos_disponibles = []
 
     def cambiar_pestana(self, pestana: str):
         self.categoria_actual = pestana
@@ -239,19 +264,438 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 boton.setProperty("active", "true" if clave == pestana else "false")
                 boton.style().unpolish(boton)
                 boton.style().polish(boton)
+
+        if hasattr(self, "btnCrearGrupo"):
+            self.btnCrearGrupo.setVisible(pestana == "grupos")
+
+        if hasattr(self, "stackedDerecha"):
+            self.stackedDerecha.setCurrentIndex(0)
+
+        if pestana != "grupos":
+            self.grupo_activo_id = None
+        elif not self.grupo_activo_id:
+            self.txtMsgs.clear()
+            self.agregar_aviso_sistema(
+                "Selecciona un grupo de la lista o haz clic en '+ Crear grupo'"
+            )
+            if hasattr(self, "lblIndicadorChat"):
+                self.lblIndicadorChat.setText("Grupos")
+
         self.refrescar_lista_actual()
 
+    # ==================== PASO 4: FORMULARIO CREAR GRUPO ====================
+    def abrir_formulario_grupo(self):
+        self.txtNombreGrupo.clear()
+        self.listaMiembrosGrupo.clear()
+
+        unicos = {}
+        for u in self.todos_usuarios_bd + self.usuarios_conectados:
+            limpio = u.strip()
+            if limpio and limpio.lower() != self.user_name.strip().lower():
+                unicos[limpio.lower()] = limpio
+
+        for nombre in sorted(unicos.values(), key=str.lower):
+            item = QListWidgetItem(nombre)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.listaMiembrosGrupo.addItem(item)
+
+        self.lblIndicadorChat.setText("Nuevo grupo")
+        self.stackedDerecha.setCurrentIndex(1)
+        self.txtNombreGrupo.setFocus()
+
+    def cerrar_formulario_grupo(self):
+        self.stackedDerecha.setCurrentIndex(0)
+        self.actualizar_indicador_chat()
+
+    def confirmar_crear_grupo(self):
+        nombre_grupo = self.txtNombreGrupo.text().strip()
+        if not nombre_grupo:
+            QMessageBox.warning(
+                self, "Falta nombre", "Escribe un nombre para el grupo."
+            )
+            return
+
+        miembros = []
+        for i in range(self.listaMiembrosGrupo.count()):
+            item = self.listaMiembrosGrupo.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                miembros.append(item.text().strip())
+
+        if not miembros:
+            QMessageBox.warning(
+                self, "Sin miembros", "Selecciona al menos un miembro para el grupo."
+            )
+            return
+
+        id_grupo = mssql.crear_grupo_bd(nombre_grupo, self.user_id, miembros)
+        if not id_grupo:
+            QMessageBox.critical(
+                self, "Error", "No se pudo guardar el grupo en la base de datos."
+            )
+            return
+
+        if connected and server:
+            lista_csv = ",".join(miembros)
+            server.sendall(
+                f"<nuevo_grupo>{id_grupo}|{nombre_grupo}|{lista_csv}\n".encode("utf-8")
+            )
+
+        self.grupos_disponibles = mssql.obtener_grupos_usuario(self.user_id)
+        self.refrescar_lista_actual()
+
+        self.grupo_activo_id = id_grupo
+        self.usuario_activo = nombre_grupo
+        self.cerrar_formulario_grupo()
+        self.txtSend.setPlaceholderText(f"Mensaje en {nombre_grupo}...")
+        self.txtMsgs.clear()
+        self.agregar_aviso_sistema(
+            f"Grupo '{nombre_grupo}' creado. Miembros: {', '.join(miembros)}"
+        )
+
+    # ==================== PASO 5: LISTAS Y RENDERIZADO ====================
     def refrescar_lista_actual(self):
         if self.categoria_actual == "chats":
-            otros = [
-                u for u in self.usuarios_conectados
-                if u.lower() != self.user_name.strip().lower()
-            ]
-            self.actualizar_usuarios(["Global"] + otros)
+            unicos = {}
+            for u in self.todos_usuarios_bd + self.usuarios_conectados:
+                limpio = u.strip()
+                if limpio:
+                    unicos[limpio.lower()] = limpio
+
+            mi_usuario = self.user_name.strip()
+            if mi_usuario:
+                unicos[mi_usuario.lower()] = mi_usuario
+
+            lista_usuarios = list(unicos.values())
+            conectados_lower = {u.lower() for u in self.usuarios_conectados}
+            mi_usuario_lower = mi_usuario.lower()
+
+            lista_usuarios.sort(
+                key=lambda u: (
+                    u.lower() != mi_usuario_lower,
+                    u.lower() not in conectados_lower,
+                    u.lower(),
+                )
+            )
+            self.actualizar_usuarios(["Global"] + lista_usuarios, es_chat=True)
         elif self.categoria_actual == "grupos":
-            self.actualizar_usuarios(self.grupos_disponibles)
+            self.actualizar_usuarios(
+                self.grupos_disponibles, es_chat=False, es_grupo=True
+            )
         elif self.categoria_actual == "canal":
-            self.actualizar_usuarios(self.canales_disponibles)
+            self.actualizar_usuarios(self.canales_disponibles, es_chat=False)
+
+    def actualizar_usuarios(
+        self, usuarios: list, es_chat: bool = False, es_grupo: bool = False
+    ):
+        self.modelo_chats.clear()
+        conectados_lower = {u.lower() for u in self.usuarios_conectados}
+        mi_usuario_lower = self.user_name.strip().lower()
+
+        for usuario in usuarios:
+            if es_grupo and isinstance(usuario, dict):
+                nombre_g = usuario["nombre_grupo"]
+                item = QStandardItem(f"👥 {nombre_g}")
+                item.setEditable(False)
+                item.setData(usuario, Qt.ItemDataRole.UserRole)
+                self.modelo_chats.appendRow(item)
+                continue
+
+            usuario = str(usuario).strip()
+            if not usuario:
+                continue
+
+            if es_chat:
+                if usuario == "Global":
+                    texto_visible = "🌐 Global"
+                elif usuario.lower() == mi_usuario_lower:
+                    icono = (
+                        "🟢"
+                        if (connected or usuario.lower() in conectados_lower)
+                        else "⚪"
+                    )
+                    texto_visible = f"{icono} {usuario} (tú)"
+                elif usuario.lower() in conectados_lower:
+                    texto_visible = f"🟢 {usuario}"
+                else:
+                    texto_visible = f"⚪ {usuario}"
+            else:
+                texto_visible = usuario
+
+            item = QStandardItem(texto_visible)
+            item.setEditable(False)
+            item.setData(usuario, Qt.ItemDataRole.UserRole)
+            self.modelo_chats.appendRow(item)
+
+    def actualizar_indicador_chat(self):
+        if not hasattr(self, "lblIndicadorChat"):
+            return
+        usuario = getattr(self, "usuario_activo", "Global")
+        if self.categoria_actual == "grupos":
+            if getattr(self, "grupo_activo_id", None):
+                self.lblIndicadorChat.setText(f"Grupo: {usuario}")
+            else:
+                self.lblIndicadorChat.setText("Grupos")
+        elif usuario == "Global":
+            self.lblIndicadorChat.setText("Chat actual: Global")
+        elif self.categoria_actual == "chats":
+            conectados_lower = {u.lower() for u in self.usuarios_conectados}
+            es_yo = usuario.lower() == self.user_name.strip().lower()
+            etiqueta = f"{usuario} (tú)" if es_yo else usuario
+            estado = (
+                "🟢 En línea"
+                if (es_yo and connected) or (usuario.lower() in conectados_lower)
+                else "⚪ Desconectado"
+            )
+            self.lblIndicadorChat.setText(f"Chat actual: {etiqueta} · {estado}")
+        elif self.categoria_actual == "canal":
+            self.lblIndicadorChat.setText(f"Canal: {usuario}")
+
+    # ==================== PASO 6: SELECCIÓN, ENVÍO Y RECEPCIÓN ====================
+    def user_seleccionado(self, index: QModelIndex):
+        data = index.data(Qt.ItemDataRole.UserRole) or index.data()
+        if not data:
+            return
+
+        if hasattr(self, "stackedDerecha"):
+            self.stackedDerecha.setCurrentIndex(0)
+
+        # Selección de un grupo
+        if self.categoria_actual == "grupos" and isinstance(data, dict):
+            self.grupo_activo_id = data["id_grupo"]
+            self.usuario_activo = data["nombre_grupo"]
+            self.actualizar_indicador_chat()
+            self.txtSend.setPlaceholderText(f"Mensaje en {self.usuario_activo}...")
+            self.txtSend.setFocus()
+            self.txtMsgs.clear()
+
+            if connected and server:
+                try:
+                    server.sendall(
+                        f"<historial_grupo>{self.grupo_activo_id}\n".encode("utf-8")
+                    )
+                except OSError as e:
+                    self.agregar_aviso_sistema(
+                        f"[Error al pedir historial del grupo: {e}]"
+                    )
+            return
+
+        # Selección de Global, privado o canal
+        self.grupo_activo_id = None
+        usuario = str(data).strip()
+        self.usuario_activo = usuario
+        self.actualizar_indicador_chat()
+        self.txtSend.setPlaceholderText(f"Mensaje en {usuario}...")
+        self.txtSend.setFocus()
+
+        if usuario == "Global":
+            self.mostrar_global()
+        elif self.categoria_actual == "chats" and connected and server:
+            self.txtMsgs.clear()
+            try:
+                server.sendall(f"<historial>{usuario}\n".encode("utf-8"))
+            except OSError as e:
+                self.agregar_aviso_sistema(f"[Error al pedir historial: {e}]")
+        else:
+            self.txtMsgs.clear()
+            self.agregar_aviso_sistema(f"Estás en {usuario}")
+
+    def mensaje_saliente(self):
+        texto = self.txtSend.text().strip()
+        if not texto or not connected or not server:
+            return
+
+        if self.categoria_actual == "grupos":
+            if not getattr(self, "grupo_activo_id", None):
+                self.agregar_aviso_sistema(
+                    "Selecciona o crea un grupo antes de enviar un mensaje."
+                )
+                return
+            server.sendall(
+                f"<grupo_msg>{self.grupo_activo_id}|{texto}\n".encode("utf-8")
+            )
+            self.txtSend.clear()
+            self.agregar_burbuja("Tú", texto, es_mio=True)
+            return
+
+        destino = getattr(self, "usuario_activo", None) or "Global"
+
+        if destino == "Global":
+            server.sendall(f"{texto}\n".encode("utf-8"))
+            self.historial_global.append(("burbuja", "Tú", texto, True))
+        else:
+            paquete = f"<msg>{destino}|{texto}\n"
+            server.sendall(paquete.encode("utf-8"))
+
+        self.txtSend.clear()
+        self.agregar_burbuja("Tú", texto, es_mio=True)
+
+    def procesar_mensaje(self, msg: str):
+        if msg.startswith("<users>"):
+            contenido = msg.removeprefix("<users>")
+            if contenido.endswith("</users>"):
+                contenido = contenido[:-8]
+            self.usuarios_conectados = [
+                u.strip() for u in contenido.split(",") if u.strip()
+            ]
+            bd_lower = {u.lower() for u in self.todos_usuarios_bd}
+            for u in self.usuarios_conectados:
+                if u.lower() not in bd_lower:
+                    self.todos_usuarios_bd.append(u)
+                    bd_lower.add(u.lower())
+
+            self.refrescar_lista_actual()
+            self.actualizar_indicador_chat()
+
+        elif msg.startswith("<nuevo_grupo>"):
+            if self.user_id is not None:
+                self.grupos_disponibles = mssql.obtener_grupos_usuario(self.user_id)
+                if self.categoria_actual == "grupos":
+                    self.refrescar_lista_actual()
+
+        elif msg == "<!!duplicate!!>":
+            if self.coneccion:
+                self.coneccion.stop()
+            QMessageBox.warning(
+                self,
+                "Sesión duplicada",
+                f"El usuario '{self.user_name}' ya tiene una sesión activa.",
+            )
+            self.ventana_login = VentanaLogin()
+            self.ventana_login.show()
+            self.close()
+            return
+
+        elif msg.startswith("<grupo_msg>"):
+            payload = msg.removeprefix("<grupo_msg>")
+            partes = payload.split("|", 2)
+            if len(partes) == 3:
+                id_g_str, remitente, contenido = partes
+                remitente = remitente.strip()
+                if remitente.lower() == self.user_name.strip().lower():
+                    return
+                if (
+                    self.categoria_actual == "grupos"
+                    and str(getattr(self, "grupo_activo_id", "")) == id_g_str.strip()
+                ):
+                    self.agregar_burbuja(remitente, contenido, es_mio=False)
+                else:
+                    self.agregar_aviso_sistema(
+                        f"Nuevo mensaje de grupo de {remitente}"
+                    )
+
+        elif msg.startswith("<historial_grupo_data>"):
+            payload = msg.removeprefix("<historial_grupo_data>").strip()
+            self.mostrar_historial_grupo(payload)
+
+        elif msg.startswith("<msg>"):
+            payload = msg.removeprefix("<msg>")
+            if "|" in payload:
+                remitente, contenido = payload.split("|", 1)
+                remitente = remitente.strip()
+                if remitente.lower() == self.user_name.strip().lower():
+                    return
+                if (
+                    getattr(self, "usuario_activo", None) or ""
+                ).lower() == remitente.lower():
+                    self.agregar_burbuja(remitente, contenido, es_mio=False)
+                else:
+                    self.agregar_aviso_sistema(
+                        f"Nuevo mensaje privado de {remitente}"
+                    )
+
+        elif msg.startswith("<historial_data>"):
+            payload = msg.removeprefix("<historial_data>").strip()
+            self.mostrar_historial(payload)
+
+        elif msg.startswith("<historial>") and msg.endswith("</historial>"):
+            payload = msg.removeprefix("<historial>")[:-12].strip()
+            self.mostrar_historial(payload)
+
+        else:
+            match_brackets = re.match(r"^<([^>]+)>\s*(.+)$", msg, re.DOTALL)
+            match_colon = re.match(r"^([^:]{1,30}):\s*(.+)$", msg, re.DOTALL)
+
+            if match_brackets and not msg.startswith("<!!"):
+                remitente, contenido = match_brackets.group(1), match_brackets.group(2)
+                self.historial_global.append(("burbuja", remitente, contenido, False))
+                if getattr(self, "usuario_activo", None) == "Global":
+                    self.agregar_burbuja(remitente, contenido, es_mio=False)
+            elif match_colon and not msg.startswith("***"):
+                remitente, contenido = match_colon.group(1), match_colon.group(2)
+                self.historial_global.append(("burbuja", remitente, contenido, False))
+                if getattr(self, "usuario_activo", None) == "Global":
+                    self.agregar_burbuja(remitente, contenido, es_mio=False)
+            else:
+                self.historial_global.append(("sistema", msg))
+                if getattr(self, "usuario_activo", None) == "Global":
+                    self.agregar_aviso_sistema(msg)
+
+    def mostrar_historial_grupo(self, raw_data: str):
+        try:
+            data = json.loads(raw_data.strip())
+        except json.JSONDecodeError:
+            self.agregar_aviso_sistema("Error al obtener historial del grupo")
+            return
+
+        id_grupo = data.get("id_grupo")
+        mensajes = data.get("mensajes", [])
+
+        if getattr(self, "grupo_activo_id", None) != id_grupo:
+            return
+
+        self.txtMsgs.clear()
+
+        if not mensajes:
+            self.agregar_aviso_sistema("No hay mensajes previos en este grupo")
+            return
+
+        for msg in mensajes:
+            remitente = msg.get("remitente", "Desconocido")
+            contenido = msg.get("contenido", "")
+            fecha = msg.get("fecha_envio", "")
+            es_mio = remitente.strip().lower() == self.user_name.strip().lower()
+            self.agregar_burbuja(remitente, contenido, es_mio=es_mio, fecha=fecha)
+
+    def mostrar_historial(self, raw_data: str):
+        try:
+            data = json.loads(raw_data.strip())
+        except json.JSONDecodeError:
+            self.agregar_aviso_sistema("Error al obtener historial")
+            return
+
+        con_usuario = data.get("con_usuario")
+        mensajes = data.get("mensajes", [])
+
+        if getattr(self, "usuario_activo", None) and con_usuario != self.usuario_activo:
+            return
+
+        self.txtMsgs.clear()
+
+        if not mensajes:
+            self.agregar_aviso_sistema(f"No hay mensajes previos con {con_usuario}")
+            return
+
+        for msg in mensajes:
+            remitente = msg.get("remitente", "Desconocido")
+            contenido = msg.get("contenido", "")
+            fecha = msg.get("fecha_envio", "")
+            es_mio = remitente.strip().lower() == self.user_name.strip().lower()
+            self.agregar_burbuja(remitente, contenido, es_mio=es_mio, fecha=fecha)
+
+    def mostrar_global(self):
+        self.txtMsgs.clear()
+        if not self.historial_global:
+            self.agregar_aviso_sistema("Estás en el chat Global")
+            return
+
+        for item in self.historial_global:
+            if item[0] == "burbuja":
+                _, remitente, contenido, es_mio = item
+                self.agregar_burbuja(remitente, contenido, es_mio=es_mio)
+            elif item[0] == "sistema":
+                _, texto = item
+                self.agregar_aviso_sistema(texto)
 
     def agregar_burbuja(self, remitente: str, texto: str, es_mio: bool, fecha: str = ""):
         if not hasattr(self.txtMsgs, "insertHtml"):
@@ -339,22 +783,14 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.txtMsgs.verticalScrollBar().maximum()
         )
 
-    def mensaje_saliente(self):
-        texto = self.txtSend.text().strip()
-        if not texto or not connected or not server:
-            return
-
-        destino = getattr(self, "usuario_activo", None) or "Global"
-
-        if destino == "Global":
-            # En Global todos hablan con todos como hasta ahora
-            server.sendall(f"{texto}\n".encode("utf-8"))
+    def mensage_entrante(self, mensaje):
+        if hasattr(self.txtMsgs, "setPlainText"):
+            self.txtMsgs.setPlainText(self.txtMsgs.toPlainText() + mensaje)
         else:
-            paquete = f"<msg>{destino}|{texto}\n"
-            server.sendall(paquete.encode("utf-8"))
-
-        self.txtSend.clear()
-        self.agregar_burbuja("Tú", texto, es_mio=True)
+            self.txtMsgs.append(mensaje)
+        self.txtMsgs.verticalScrollBar().setValue(
+            self.txtMsgs.verticalScrollBar().maximum()
+        )
 
     def salir(self):
         if self.coneccion:
@@ -370,121 +806,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
             port = dialog.txtPort.text().strip()
             if host and port and port.isnumeric():
                 self.conectar_servidor(host, int(port), self.user_id, user)
-
-    def procesar_mensaje(self, msg: str):
-        if msg.startswith("<users>"):
-            contenido = msg.removeprefix("<users>")
-            if contenido.endswith("</users>"):
-                contenido = contenido[:-8]
-            self.usuarios_conectados = [
-                u.strip() for u in contenido.split(",") if u.strip()
-            ]
-            self.refrescar_lista_actual()
-
-        elif msg.startswith("<msg>"):
-            payload = msg.removeprefix("<msg>")
-            if "|" in payload:
-                remitente, contenido = payload.split("|", 1)
-                remitente = remitente.strip()
-                if getattr(self, "usuario_activo", None) == remitente:
-                    self.agregar_burbuja(remitente, contenido, es_mio=False)
-                else:
-                    self.agregar_burbuja(
-                        f"{remitente} (Privado)", contenido, es_mio=False
-                    )
-
-        elif msg.startswith("<historial_data>"):
-            payload = msg.removeprefix("<historial_data>").strip()
-            self.mostrar_historial(payload)
-
-        elif msg.startswith("<historial>") and msg.endswith("</historial>"):
-            payload = msg.removeprefix("<historial>")[:-12].strip()
-            self.mostrar_historial(payload)
-
-        else:
-            # Mensajes generales (Global) o avisos del servidor
-            match_brackets = re.match(r"^<([^>]+)>\s*(.+)$", msg, re.DOTALL)
-            match_colon = re.match(r"^([^:]{1,30}):\s*(.+)$", msg, re.DOTALL)
-
-            if match_brackets and not msg.startswith("<!!"):
-                remitente, contenido = match_brackets.group(1), match_brackets.group(2)
-                self.agregar_burbuja(remitente, contenido, es_mio=False)
-            elif match_colon and not msg.startswith("***"):
-                remitente, contenido = match_colon.group(1), match_colon.group(2)
-                self.agregar_burbuja(remitente, contenido, es_mio=False)
-            else:
-                self.agregar_aviso_sistema(msg)
-
-    def mensage_entrante(self, mensaje):
-        if hasattr(self.txtMsgs, "setPlainText"):
-            self.txtMsgs.setPlainText(self.txtMsgs.toPlainText() + mensaje)
-        else:
-            self.txtMsgs.append(mensaje)
-        self.txtMsgs.verticalScrollBar().setValue(
-            self.txtMsgs.verticalScrollBar().maximum()
-        )
-
-    def mostrar_historial(self, raw_data: str):
-        try:
-            data = json.loads(raw_data.strip())
-        except json.JSONDecodeError:
-            self.agregar_aviso_sistema("Error al obtener historial")
-            return
-
-        con_usuario = data.get("con_usuario")
-        mensajes = data.get("mensajes", [])
-
-        if getattr(self, "usuario_activo", None) and con_usuario != self.usuario_activo:
-            return
-
-        self.txtMsgs.clear()
-
-        if not mensajes:
-            self.agregar_aviso_sistema(f"No hay mensajes previos con {con_usuario}")
-            return
-
-        for msg in mensajes:
-            remitente = msg.get("remitente", "Desconocido")
-            contenido = msg.get("contenido", "")
-            fecha = msg.get("fecha_envio", "")
-            es_mio = remitente.strip().lower() == self.user_name.strip().lower()
-            self.agregar_burbuja(remitente, contenido, es_mio=es_mio, fecha=fecha)
-
-    def actualizar_usuarios(self, usuarios: list[str]):
-        self.modelo_chats.clear()
-        for usuario in usuarios:
-            usuario = usuario.strip()
-            if usuario:
-                item = QStandardItem(usuario)
-                item.setEditable(False)
-                item.setData(usuario, Qt.ItemDataRole.UserRole)
-                self.modelo_chats.appendRow(item)
-
-    def user_seleccionado(self, index: QModelIndex):
-        usuario = index.data(Qt.ItemDataRole.UserRole) or index.data()
-        if not usuario:
-            return
-        usuario = str(usuario).strip()
-        self.usuario_activo = usuario
-
-        if hasattr(self, "lblIndicadorChat"):
-            if usuario == "Global":
-                self.lblIndicadorChat.setText("Chat actual: Global")
-            elif self.categoria_actual == "chats":
-                self.lblIndicadorChat.setText(f"Chat actual: {usuario}")
-            elif self.categoria_actual == "grupos":
-                self.lblIndicadorChat.setText(f"Grupo: {usuario}")
-            elif self.categoria_actual == "canal":
-                self.lblIndicadorChat.setText(f"Canal: {usuario}")
-
-        self.txtSend.setPlaceholderText(f"Mensaje en {usuario}...")
-        self.txtSend.setFocus()
-
-        if usuario != "Global" and self.categoria_actual == "chats" and connected and server:
-            try:
-                server.sendall(f"<historial>{usuario}\n".encode("utf-8"))
-            except OSError as e:
-                self.agregar_aviso_sistema(f"[Error al pedir historial: {e}]")
 
 
 class MiDialogo(QDialog, Ui_Dialog):
