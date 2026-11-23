@@ -1,13 +1,48 @@
 import pyodbc
 
+import os
+import platform
+import pyodbc
+
+
+def _resolver_driver() -> str:
+    instalados = pyodbc.drivers()
+    sistema = platform.system()
+
+    if sistema == "Windows":
+        candidatos = [
+            "ODBC Driver 18 for SQL Server",
+            "ODBC Driver 17 for SQL Server",
+            "ODBC Driver 13 for SQL Server",
+            "SQL Server Native Client 11.0",
+            "SQL Server",
+        ]
+    else:
+        # Linux y macOS
+        candidatos = [
+            "ODBC Driver 18 for SQL Server",
+            "ODBC Driver 17 for SQL Server",
+        ]
+
+    for candidato in candidatos:
+        if candidato in instalados:
+            return candidato
+
+    for drv in instalados:
+        if "SQL Server" in drv:
+            return drv
+
+    raise RuntimeError(
+        f"No se encontró un driver ODBC de SQL Server en {sistema}. "
+        f"Drivers detectados: {instalados or 'ninguno'}."
+    )
 
 def obtener_conexion():
     return pyodbc.connect(
-        "DRIVER={SQL Server};"  # O 'ODBC Driver 18 for SQL Server'
+        "DRIVER=" + _resolver_driver() + ";"  # O 'ODBC Driver 18 for SQL Server'
         "SERVER=3.149.102.2;"  # O la IP de tu servidor
         "DATABASE=GANADORES;"  # El nombre de tu base de datos
         "UID=esteves;"  # Tu usuario de SQL Server
-        "PWD=Punkas123;"
         "TrustServerCertificate=yes;"
     )
 

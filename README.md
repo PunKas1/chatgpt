@@ -3,19 +3,25 @@ Chat de gpt
 
 Hola profesor para ejecutar la vista hay que instalar los Requerimientos: 
 
-pip install -r Requerimientos.txt
+pip install -r requirements.txt
 
 si lo va a ejecutar en una distro Ubunto o debian: 
 
 sudo apt update
-sudo apt install -y unixodbc-dev
+sudo apt install -y unixodbc-dev curl gnupg
 pip install -r requirements.txt
 
 
 Driver para el uso de pyodbc ODBC
 
-curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
-curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+curl -sSL [https://packages.microsoft.com/keys/microsoft.asc](https://packages.microsoft.com/keys/microsoft.asc) | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null
 
-sudo apt-get update
-sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+curl -sSL "[https://packages.microsoft.com/config/ubuntu/$](https://packages.microsoft.com/config/ubuntu/$)(. /etc/os-release && echo "$VERSION_ID")/prod.list" | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+
+sudo apt update
+sudo ACCEPT_EULA=Y apt install -y msodbcsql18
+
+
+ejecutar vista desde la carpeta raiz 
+
+python -m chats.cliente
