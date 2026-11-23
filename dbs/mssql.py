@@ -38,11 +38,13 @@ def _resolver_driver() -> str:
     )
 
 def obtener_conexion():
+    driver = _resolver_driver()
     return pyodbc.connect(
-        "DRIVER=" + _resolver_driver() + ";"  # O 'ODBC Driver 18 for SQL Server'
-        "SERVER=3.149.102.2;"  # O la IP de tu servidor
-        "DATABASE=GANADORES;"  # El nombre de tu base de datos
-        "UID=esteves;"  # Tu usuario de SQL Server
+        f"DRIVER={{{driver}}};"
+        "SERVER=3.149.102.2;"
+        "DATABASE=GANADORES;"
+        "UID=esteves;"
+        "PWD=Punkas123;"
         "TrustServerCertificate=yes;"
     )
 
