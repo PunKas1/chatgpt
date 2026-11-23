@@ -2,7 +2,16 @@ import json
 import socket
 import threading
 
-from dbs.mssql import recuperarHistorialUnoAUno, guardarMensajeUnoAUno
+from dbs.mssql import (
+    guardar_mensaje_canal,
+    guardar_mensaje_grupo,
+    guardarMensajeUnoAUno,
+    obtener_canales,
+    obtener_miembros_grupo,
+    recuperar_historial_canal,
+    recuperar_historial_grupo,
+    recuperarHistorialUnoAUno,
+)
 
 BUFFER_SIZE = 1024
 clients_lock = threading.Lock()
@@ -27,6 +36,7 @@ def isUserConnected(user_id: str, name: str) -> bool:
             ):
                 return True
     return False
+
 
 def broadcast_connected_users():
     users = ",".join(connected_users())
@@ -107,6 +117,149 @@ def recuperarHistorial(client, usuario_objetivo: str):
         remove(client)
 
 
+def recuperarHistorialGrupo(client, id_grupo: int):
+    if not client or not client.name:
+        return
+
+    mensajes = recuperar_historial_grupo(
+        id_grupo=id_grupo,
+        usuario_solicitante=client.name,
+    )
+    payload = json.dumps(
+        {
+            "id_grupo": id_grupo,
+            "mensajes": mensajes,
+        },
+        ensure_ascii=False,
+    )
+
+    try:
+        client.conn.sendall(f"<historial_grupo_data>{payload}\n".encode("utf-8"))
+    except OSError:
+        remove(client)
+
+def recuperarHistorialCanal(client, id_canal: int):
+    if not client or not client.name:
+        return
+
+    mensajes = recuperar_historial_canal(id_canal=id_canal)
+    payload = json.dumps(
+        {
+            "id_canal": id_canal,
+            "mensajes": mensajes,
+        },
+        ensure_ascii=False,
+    )
+
+    try:
+        client.conn.sendall(f"<historial_canal_data>{payload}\n".encode("utf-8"))
+    except OSError:
+        remove(client)
+
+
+def notificarNuevoGrupo(id_grupo: str, nombre_grupo: str, miembros_csv: str, clave_imagen:str):
+    miembros_set = {
+        m.strip().lower() for m in miembros_csv.split(",") if m.strip()
+    }
+    if not miembros_set:
+        return
+
+    paquete = f"<nuevo_grupo>{id_grupo}|{nombre_grupo}|{clave_imagen}\n".encode("utf-8")
+
+    with clients_lock:
+        targets = [
+            c for c in list_of_clients if c.name and c.name.lower() in miembros_set
+        ]
+
+    for client in targets:
+        try:
+            client.conn.sendall(paquete)
+        except OSError:
+            remove(client)
+
+def notificarNuevoCanal(
+    id_canal: str, nombre_canal: str, descripcion: str, id_creador: str, clave_imagen:str):
+    if not nombre_canal:
+        return
+
+    paquete = (
+        f"<nuevo_canal>{id_canal}|{nombre_canal}|{descripcion}|{id_creador}|{clave_imagen}\n"
+    ).encode("utf-8")
+
+    with clients_lock:
+        targets = [c for c in list_of_clients if c.name]
+
+    for client in targets:
+        try:
+            client.conn.sendall(paquete)
+        except OSError:
+            remove(client)
+
+
+def enviarMensajeGrupo(remitente_client, id_grupo: int, contenido: str):
+    if not remitente_client or not remitente_client.name or not contenido:
+        return
+
+    # Valida en SQL Server que el remitente sea miembro del grupo antes de guardar y reenviar
+    if not guardar_mensaje_grupo(id_grupo, remitente_client.name, contenido):
+        return
+
+    miembros_lower = {
+        m.strip().lower() for m in obtener_miembros_grupo(id_grupo) if m.strip()
+    }
+    remitente_lower = remitente_client.name.strip().lower()
+    paquete = f"<grupo_msg>{id_grupo}|{remitente_client.name}|{contenido}\n".encode(
+        "utf-8"
+    )
+
+    with clients_lock:
+        targets = [
+            c
+            for c in list_of_clients
+            if c.name
+            and c.name.lower() in miembros_lower
+            and c.name.lower() != remitente_lower
+        ]
+
+    for client in targets:
+        try:
+            client.conn.sendall(paquete)
+        except OSError:
+            remove(client)
+
+def enviarMensajeCanal(remitente_client, id_canal: int, contenido: str):
+    if not remitente_client or not remitente_client.name or not contenido:
+        return
+
+    # Valida en SQL Server que remitente_client.name sea el creador del canal y guarda en MensajesCanal
+    if not guardar_mensaje_canal(id_canal, remitente_client.name, contenido):
+        try:
+            aviso = "Solo el creador del canal puede enviar mensajes.\n".encode(
+                "utf-8"
+            )
+            remitente_client.conn.sendall(aviso)
+        except OSError:
+            remove(remitente_client)
+        return
+
+    paquete = (
+        f"<canal_msg>{id_canal}|{remitente_client.name}|{contenido}\n"
+    ).encode("utf-8")
+
+    with clients_lock:
+        targets = [
+            c
+            for c in list_of_clients
+            if c.name and c.conn != remitente_client.conn
+        ]
+
+    for client in targets:
+        try:
+            client.conn.sendall(paquete)
+        except OSError:
+            remove(client)
+
+
 def broadcast(message: str, connection):
     with clients_lock:
         targets = [c for c in list_of_clients if c.conn != connection]
@@ -139,9 +292,6 @@ def remove(target):
 def connected_users() -> list[str]:
     with clients_lock:
         return [c.name for c in list_of_clients if c.name]
-
-
-
 
 
 def clientthread(conn, addr):
@@ -177,6 +327,58 @@ def clientthread(conn, addr):
                     cliente_actual = getCliente(conn)
                     if cliente_actual:
                         recuperarHistorial(cliente_actual, usuario_objetivo)
+                elif msg.startswith("<nuevo_grupo>"):
+                    partes = msg.removeprefix("<nuevo_grupo>").split("|", 3)
+                    if len(partes) >= 3:
+                        id_g = partes[0].strip()
+                        nom_g = partes[1].strip()
+                        miembros_csv = partes[2]
+                        img_g = partes[3].strip() if len(partes) >= 4 else ""
+                        notificarNuevoGrupo(id_g, nom_g, miembros_csv, img_g)
+                elif msg.startswith("<grupo_msg>"):
+                    payload = msg.removeprefix("<grupo_msg>")
+                    if "|" not in payload:
+                        continue
+                    id_g_str, contenido = payload.split("|", 1)
+                    id_g_str = id_g_str.strip()
+                    contenido = contenido.strip()
+                    cliente_actual = getCliente(conn)
+                    if id_g_str.isdigit() and cliente_actual and contenido:
+                        enviarMensajeGrupo(
+                            cliente_actual, int(id_g_str), contenido
+                        )
+                elif msg.startswith("<historial_grupo>"):
+                    id_g_str = msg.removeprefix("<historial_grupo>").strip()
+                    cliente_actual = getCliente(conn)
+                    if id_g_str.isdigit() and cliente_actual:
+                        recuperarHistorialGrupo(cliente_actual, int(id_g_str))
+                elif msg.startswith("<nuevo_canal>"):
+                    partes = msg.removeprefix("<nuevo_canal>").split("|", 4)
+                    if len(partes) >= 2:
+                        id_c = partes[0].strip()
+                        nom_c = partes[1].strip()
+                        desc_c = partes[2].strip() if len(partes) >= 3 else ""
+                        creador_c = partes[3].strip() if len(partes) >= 4 else ""
+                        img_c = partes[4].strip() if len(partes) >= 5 else ""
+                        notificarNuevoCanal(id_c, nom_c, desc_c, creador_c, img_c)
+                        notificarNuevoCanal(id_c, nom_c, desc_c, creador_c)
+                elif msg.startswith("<canal_msg>"):
+                    payload = msg.removeprefix("<canal_msg>")
+                    if "|" not in payload:
+                        continue
+                    id_c_str, contenido = payload.split("|", 1)
+                    id_c_str = id_c_str.strip()
+                    contenido = contenido.strip()
+                    cliente_actual = getCliente(conn)
+                    if id_c_str.isdigit() and cliente_actual and contenido:
+                        enviarMensajeCanal(
+                            cliente_actual, int(id_c_str), contenido
+                        )
+                elif msg.startswith("<historial_canal>"):
+                    id_c_str = msg.removeprefix("<historial_canal>").strip()
+                    cliente_actual = getCliente(conn)
+                    if id_c_str.isdigit() and cliente_actual:
+                        recuperarHistorialCanal(cliente_actual, int(id_c_str))
                 elif msg.startswith("<msg>"):
                     payload = msg.removeprefix("<msg>")
                     if "|" not in payload:
@@ -200,9 +402,11 @@ def clientthread(conn, addr):
                                 objetivo_conn = c.conn
                                 break
 
-                    if objetivo_conn and objetivo_conn != conn:
+                    if objetivo_conn:
                         try:
-                            paquete = f"<msg>{cliente_actual.name}|{contenido}\n".encode("utf-8")
+                            paquete = f"<msg>{cliente_actual.name}|{contenido}\n".encode(
+                                "utf-8"
+                            )
                             objetivo_conn.sendall(paquete)
                         except OSError:
                             remove(objetivo_conn)

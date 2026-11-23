@@ -12,12 +12,7 @@ GO
 CREATE TABLE Mensajes (
     id_mensaje INT IDENTITY(1,1) PRIMARY KEY,
     id_usuario INT NOT NULL,
-    id_remitente int not null,
-	id_destinatario	int not null,
-    contenido	nvarchar(max) not null,
-    FOREIGN key (id_remitente) references Usuarios(id_usuario),
-    foreign key (id_destinatario) references Usuarios(id_usuario),
-
+    
     fecha_envio DATETIME DEFAULT GETDATE(),
     FOREIGN KEY (id_usuario) REFERENCES Usuarios(id_usuario)
 );
