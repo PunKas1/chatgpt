@@ -2,7 +2,7 @@ import pyodbc
 
 import os
 import platform
-import pyodbc
+
 
 
 def _resolver_driver() -> str:
@@ -39,15 +39,21 @@ def _resolver_driver() -> str:
 
 def obtener_conexion():
     driver = _resolver_driver()
-    return pyodbc.connect(
+    host = "3.149.102.2"
+    port=1433
+    uid="esteves"
+    pwd="Punkas123"
+    database="GANADORES"
+    conn_str = (
         f"DRIVER={{{driver}}};"
-        "SERVER=3.149.102.2;"
-        "DATABASE=GANADORES;"
-        "UID=esteves;"
-        "PWD=Punkas123;"
+        f"SERVER={host},{port};"
+        f"DATABASE={database};"
+        f"UID={uid};"
+        f"PWD={pwd};"
+        "Encrypt=no;"
         "TrustServerCertificate=yes;"
     )
-
+    return pyodbc.connect(conn_str)
 
 def guardar_mensaje(usuario, contenido):
     conexion = obtener_conexion()

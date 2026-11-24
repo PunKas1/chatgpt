@@ -3,12 +3,10 @@ import json
 import re
 import socket
 import sys
-
 from pathlib import Path
 
-
-from PySide6.QtCore import QModelIndex, Qt, QThread, Signal
-from PySide6.QtGui import QStandardItem, QStandardItemModel, QTextCursor, QIcon, QPixmap
+from PySide6.QtCore import QModelIndex, QSize, Qt, QThread, Signal
+from PySide6.QtGui import QIcon, QPixmap, QStandardItem, QStandardItemModel, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -31,23 +29,60 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 IMAGES_DIR = BASE_DIR / "images"
 
 
+class WorkerBD(QThread):
+    finished_ok = Signal(object)
+    finished_err = Signal(str)
+
+    def __init__(self, fn, *args, parent=None, **kwargs):
+        super().__init__(parent)
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+    def run(self):
+        try:
+            resultado = self.fn(*self.args, **self.kwargs)
+            self.finished_ok.emit(resultado)
+        except Exception as exc:
+            self.finished_err.emit(str(exc))
+
+
 class ThreadSocket(QThread):
     signal_message = Signal(str)
+    signal_error = Signal(str)
 
-    def __init__(self, host, port, user_id, name):
-        global connected, server
-        super().__init__()
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.connect((host, port))
-        connected = True
-        server.sendall(f"<name>{user_id}|{name}\n".encode("utf-8"))
+    def __init__(self, host, port, user_id, name, parent=None):
+        super().__init__(parent)
+        self.host = host
+        self.port = port
+        self.user_id = user_id
+        self.name = name
+        self._running = True
+        self.sock = None
 
     def run(self):
         global connected, server
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            sock.connect((self.host, self.port))
+            sock.settimeout(1.0)
+            self.sock = sock
+            server = sock
+            connected = True
+            sock.sendall(f"<name>{self.user_id}|{self.name}\n".encode("utf-8"))
+        except OSError as e:
+            connected = False
+            self.signal_error.emit(str(e))
+            return
+
         buffer = ""
         try:
-            while connected:
-                chunk = server.recv(BUFFER_SIZE)
+            while self._running and connected:
+                try:
+                    chunk = sock.recv(BUFFER_SIZE)
+                except socket.timeout:
+                    continue
                 if not chunk:
                     self.signal_message.emit("<!!disconected!!>")
                     break
@@ -60,25 +95,31 @@ class ThreadSocket(QThread):
                     if linea:
                         self.signal_message.emit(linea)
         except Exception:
-            self.signal_message.emit("<!!error!!>")
+            if self._running:
+                self.signal_message.emit("<!!error!!>")
         finally:
-            if server:
-                try:
-                    server.close()
-                except OSError:
-                    pass
             connected = False
-
-    def stop(self):
-        global connected, server
-        connected = False
-        if server:
             try:
-                server.shutdown(socket.SHUT_RDWR)
-                server.close()
+                sock.close()
             except OSError:
                 pass
-        self.wait()
+            if server is sock:
+                server = None
+
+    def stop(self):
+        global connected
+        self._running = False
+        connected = False
+        if self.sock:
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        self.wait(2000)
 
 
 class VentanaLogin(QWidget, Ui_Form):
@@ -87,11 +128,24 @@ class VentanaLogin(QWidget, Ui_Form):
         super().__init__()
         self.setupUi(self)
         self.ventana_principal = None
+        self._workers = []
 
         self.bton_login.clicked.connect(self.iniciar_sesion)
         self.bton_crear.clicked.connect(self.crear_cuenta)
-        # Botones del formulario de crear canal
-        
+
+    def _run_worker(self, fn, on_ok, on_err, *args, **kwargs):
+        worker = WorkerBD(fn, *args, parent=self, **kwargs)
+        self._workers.append(worker)
+
+        def _cleanup():
+            if worker in self._workers:
+                self._workers.remove(worker)
+            worker.deleteLater()
+
+        worker.finished_ok.connect(on_ok)
+        worker.finished_err.connect(on_err)
+        worker.finished.connect(_cleanup)
+        worker.start()
 
     def crear_cuenta(self):
         usuario = self.lineEdit.text().strip()
@@ -103,8 +157,13 @@ class VentanaLogin(QWidget, Ui_Form):
             )
             return
 
-        try:
-            if mssql.crear_usuario(usuario, contrasena):
+        self.bton_crear.setEnabled(False)
+        self.bton_login.setEnabled(False)
+
+        def _on_ok(creado):
+            self.bton_crear.setEnabled(True)
+            self.bton_login.setEnabled(True)
+            if creado:
                 QMessageBox.information(
                     self,
                     "Cuenta creada",
@@ -116,12 +175,17 @@ class VentanaLogin(QWidget, Ui_Form):
                     "Usuario existente",
                     "Ese nombre de usuario ya está registrado.",
                 )
-        except Exception as e:
+
+        def _on_err(err):
+            self.bton_crear.setEnabled(True)
+            self.bton_login.setEnabled(True)
             QMessageBox.critical(
                 self,
                 "Error de base de datos",
-                f"No se pudo crear la cuenta:\n{e}",
+                f"No se pudo crear la cuenta:\n{err}",
             )
+
+        self._run_worker(mssql.crear_usuario, _on_ok, _on_err, usuario, contrasena)
 
     def iniciar_sesion(self):
         usuario = self.lineEdit.text().strip()
@@ -143,8 +207,12 @@ class VentanaLogin(QWidget, Ui_Form):
             )
             return
 
-        try:
-            datos_usuario = mssql.autenticar_usuario(usuario, contrasena)
+        self.bton_login.setEnabled(False)
+        self.bton_crear.setEnabled(False)
+
+        def _on_ok(datos_usuario):
+            self.bton_login.setEnabled(True)
+            self.bton_crear.setEnabled(True)
             if not datos_usuario:
                 QMessageBox.warning(
                     self,
@@ -154,7 +222,6 @@ class VentanaLogin(QWidget, Ui_Form):
                 return
 
             id_usuario, nombre_usuario = datos_usuario
-
             self.ventana_principal = MainWindow(
                 user_id=id_usuario,
                 user_name=nombre_usuario,
@@ -164,16 +231,16 @@ class VentanaLogin(QWidget, Ui_Form):
             self.ventana_principal.show()
             self.close()
 
-        except ConnectionRefusedError:
+        def _on_err(err):
+            self.bton_login.setEnabled(True)
+            self.bton_crear.setEnabled(True)
             QMessageBox.critical(
-                self,
-                "Error de conexión",
-                f"No se pudo conectar al servidor {host}:{port}.",
+                self, "Error", f"Ocurrió un error al iniciar sesión:\n{err}"
             )
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Error", f"Ocurrió un error al iniciar sesión:\n{e}"
-            )
+
+        self._run_worker(
+            mssql.autenticar_usuario, _on_ok, _on_err, usuario, contrasena
+        )
 
 
 class MainWindow(QMainWindow, Ui_Messenger):
@@ -201,14 +268,19 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.historial_global = []
         self.grupos_disponibles = []
         self.canales_disponibles = []
+        self._workers = []
+        self._cache_imagenes = {}
 
         self.actionSalir.triggered.connect(self.salir)
         self.coneccion = None
         self.btnSend.clicked.connect(self.mensaje_saliente)
         self.setWindowTitle("Messenger - Desconectado")
         self.txtSend.returnPressed.connect(self.mensaje_saliente)
-        self.imagenes_usuarios = {}  # {"andres": "avatar_1.png", ...}
-        self.listaChats.setIconSize(QSize(30, 30))
+        self.imagenes_usuarios = {}
+
+        if hasattr(self, "listaChats"):
+            self.listaChats.setIconSize(QSize(30, 30))
+
         # Pestañas superiores
         if hasattr(self, "btnChats"):
             self.btnChats.clicked.connect(lambda: self.cambiar_pestana("chats"))
@@ -225,7 +297,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if hasattr(self, "btnGuardarGrupo"):
             self.btnGuardarGrupo.clicked.connect(self.confirmar_crear_grupo)
 
-
         # Botones del formulario de crear canal
         if hasattr(self, "btnCrearCanal"):
             self.btnCrearCanal.clicked.connect(self.abrir_formulario_canal)
@@ -233,12 +304,10 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.btnCancelarCanal.clicked.connect(self.cerrar_formulario_canal)
         if hasattr(self, "btnGuardarCanal"):
             self.btnGuardarCanal.clicked.connect(self.confirmar_crear_canal)
+
         self.modelo_chats = QStandardItemModel()
         self.listaChats.setModel(self.modelo_chats)
         self.listaChats.clicked.connect(self.user_seleccionado)
-
-        if hasattr(self, "listaChats"):
-            self.listaChats.setIconSize(QSize(30, 30))
 
         if hasattr(self, "btnCerrarSesion"):
             self.btnCerrarSesion.clicked.connect(self.cerrar_sesion)
@@ -253,19 +322,45 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.txtSend.setPlaceholderText("Mensaje en Global...")
         self.refrescar_lista_actual()
 
-        if hasattr(self, "btnCerrarSesion"):
-            self.btnCerrarSesion.clicked.connect(self.cerrar_sesion)
-
         if host and port and user_name:
             self.conectar_servidor(host, port, user_id, user_name)
+
+    def _run_worker(self, fn, on_ok, on_err=None, *args, **kwargs):
+        worker = WorkerBD(fn, *args, parent=self, **kwargs)
+        self._workers.append(worker)
+
+        def _cleanup():
+            if worker in self._workers:
+                self._workers.remove(worker)
+            worker.deleteLater()
+
+        worker.finished_ok.connect(on_ok)
+        if on_err:
+            worker.finished_err.connect(on_err)
+        else:
+            worker.finished_err.connect(lambda err: print(f"Error en hilo BD: {err}"))
+        worker.finished.connect(_cleanup)
+        worker.start()
+
+    def _consultar_datos_iniciales(self, uid):
+        usuarios_info = mssql.obtener_usuarios_con_imagen()
+        canales = mssql.obtener_canales()
+        grupos = mssql.obtener_grupos_usuario(uid) if uid is not None else []
+        return usuarios_info, canales, grupos
 
     def conectar_servidor(self, host, port, user_id, user_name):
         self.user_id = user_id
         self.user_name = user_name
         self.cargar_usuarios_bd()
-        self._actualizar_avatar_usuario_actual()
-        self.coneccion = ThreadSocket(host, port, user_id, user_name)
+
+        if self.coneccion:
+            self.coneccion.stop()
+
+        self.coneccion = ThreadSocket(host, port, user_id, user_name, parent=self)
         self.coneccion.signal_message.connect(self.procesar_mensaje)
+        self.coneccion.signal_error.connect(
+            lambda err: self.agregar_aviso_sistema(f"[Error de socket: {err}]")
+        )
         self.coneccion.start()
         self.setWindowTitle(f"Messenger - Conectado ({user_name})")
         if hasattr(self, "lblUserConectado"):
@@ -273,31 +368,27 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.refrescar_lista_actual()
 
     def cargar_usuarios_bd(self):
-        try:
-            usuarios_info = mssql.obtener_usuarios_con_imagen()
+        def _aplicar(resultado):
+            usuarios_info, canales, grupos = resultado
             self.todos_usuarios_bd = [u["nombre_usuario"] for u in usuarios_info]
             self.imagenes_usuarios = {
                 u["nombre_usuario"].strip().lower(): u["imagen"]
                 for u in usuarios_info
                 if u.get("nombre_usuario")
             }
-            self.canales_disponibles = mssql.obtener_canales()
-            if self.user_id is not None:
-                self.grupos_disponibles = mssql.obtener_grupos_usuario(self.user_id)
-        except Exception as e:
-            print(f"Error al cargar datos de BD: {e}")
-            self.todos_usuarios_bd = []
-            self.imagenes_usuarios = {}
-            self.canales_disponibles = []
-            self.grupos_disponibles = []
+            self.canales_disponibles = canales
+            self.grupos_disponibles = grupos
+            self._actualizar_avatar_usuario_actual()
+            self.refrescar_lista_actual()
 
-    # Aquí actualizas el QStandardItemModel / lista de listaChats con los canales disponibles
+        self._run_worker(
+            self._consultar_datos_iniciales,
+            _aplicar,
+            lambda err: print(f"Error al cargar datos de BD: {err}"),
+            self.user_id,
+        )
 
-    
     def _obtener_pixmap_imagen(self, clave_imagen: str | None) -> QPixmap | None:
-        if not hasattr(self, "_cache_imagenes"):
-            self._cache_imagenes = {}
-
         if not clave_imagen:
             return None
 
@@ -321,8 +412,43 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if not pixmap:
             return QIcon()
         return QIcon(pixmap)
-    
-    
+
+    def _actualizar_avatar_chat(self, clave_imagen: str | None = None):
+        if not hasattr(self, "lblAvatarChat"):
+            return
+
+        pixmap = self._obtener_pixmap_imagen(clave_imagen)
+        if pixmap:
+            escalado = pixmap.scaled(
+                36,
+                36,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.lblAvatarChat.setPixmap(escalado)
+        else:
+            self.lblAvatarChat.clear()
+
+    def _actualizar_avatar_usuario_actual(self):
+        if not hasattr(self, "lblAvatarUsuario"):
+            return
+
+        clave_img = None
+        if self.user_name:
+            clave_img = self.imagenes_usuarios.get(self.user_name.strip().lower())
+
+        pixmap = self._obtener_pixmap_imagen(clave_img)
+        if pixmap:
+            escalado = pixmap.scaled(
+                32,
+                32,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.lblAvatarUsuario.setPixmap(escalado)
+        else:
+            self.lblAvatarUsuario.clear()
+
     def cambiar_pestana(self, pestana: str):
         self.categoria_actual = pestana
         botones = {
@@ -345,7 +471,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if hasattr(self, "stackedDerecha"):
             self.stackedDerecha.setCurrentIndex(0)
 
-        # Limpiar avatar del chat anterior al cambiar de pestaña
         self._actualizar_avatar_chat(None)
 
         if pestana != "grupos":
@@ -373,7 +498,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
 
         self.refrescar_lista_actual()
 
-    # ==================== PASO 4: FORMULARIO CREAR GRUPO ====================
+    # ==================== FORMULARIO CREAR GRUPO ====================
     def abrir_formulario_grupo(self):
         self.txtNombreGrupo.clear()
         self.listaMiembrosGrupo.clear()
@@ -398,6 +523,13 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.stackedDerecha.setCurrentIndex(0)
         self.actualizar_indicador_chat()
 
+    def _crear_grupo_y_consultar(self, nombre_grupo, uid, miembros):
+        id_grupo = mssql.crear_grupo_bd(nombre_grupo, uid, miembros)
+        if not id_grupo:
+            return None, []
+        grupos = mssql.obtener_grupos_usuario(uid) if uid is not None else []
+        return id_grupo, grupos
+
     def confirmar_crear_grupo(self):
         nombre_grupo = self.txtNombreGrupo.text().strip()
         if not nombre_grupo:
@@ -418,53 +550,66 @@ class MainWindow(QMainWindow, Ui_Messenger):
             )
             return
 
-        id_grupo = mssql.crear_grupo_bd(nombre_grupo, self.user_id, miembros)
-        if not id_grupo:
-            QMessageBox.critical(
-                self, "Error", "No se pudo guardar el grupo en la base de datos."
-            )
-            return
+        self.btnGuardarGrupo.setEnabled(False)
 
-        # 1. Refrescar grupos desde BD para obtener la clave_imagen asignada
-        self.grupos_disponibles = mssql.obtener_grupos_usuario(self.user_id)
-        grupo_creado = next(
-            (g for g in self.grupos_disponibles if int(g["id_grupo"]) == int(id_grupo)),
-            None,
-        )
-        clave_img_grupo = grupo_creado.get("imagen") if grupo_creado else None
-
-        # 2. Notificar por socket incluyendo la clave_imagen
-        if connected and server:
-            try:
-                lista_csv = ",".join(miembros)
-                paquete = (
-                    f"<nuevo_grupo>{id_grupo}|{nombre_grupo}|"
-                    f"{lista_csv}|{clave_img_grupo or ''}\n"
+        def _on_ok(resultado):
+            self.btnGuardarGrupo.setEnabled(True)
+            id_grupo, grupos = resultado
+            if not id_grupo:
+                QMessageBox.critical(
+                    self, "Error", "No se pudo guardar el grupo en la base de datos."
                 )
-                server.sendall(paquete.encode("utf-8"))
-            except OSError as e:
-                print(f"Error al notificar nuevo grupo por socket: {e}")
+                return
 
-        # 3. Actualizar lista y dejar el grupo recién creado como chat activo
-        self.refrescar_lista_actual()
+            self.grupos_disponibles = grupos
+            grupo_creado = next(
+                (g for g in self.grupos_disponibles if int(g["id_grupo"]) == int(id_grupo)),
+                None,
+            )
+            clave_img_grupo = grupo_creado.get("imagen") if grupo_creado else None
 
-        self.grupo_activo_id = id_grupo
-        self.canal_activo_id = None
-        self.canal_creador_id = None
-        self.usuario_activo = nombre_grupo
+            if connected and server:
+                try:
+                    lista_csv = ",".join(miembros)
+                    paquete = (
+                        f"<nuevo_grupo>{id_grupo}|{nombre_grupo}|"
+                        f"{lista_csv}|{clave_img_grupo or ''}\n"
+                    )
+                    server.sendall(paquete.encode("utf-8"))
+                except OSError as e:
+                    print(f"Error al notificar nuevo grupo por socket: {e}")
 
-        self._actualizar_permiso_envio_canal(True)
-        self._actualizar_avatar_chat(clave_img_grupo)
-        self.actualizar_indicador_chat()
+            self.refrescar_lista_actual()
+            self.grupo_activo_id = id_grupo
+            self.canal_activo_id = None
+            self.canal_creador_id = None
+            self.usuario_activo = nombre_grupo
 
-        self.cerrar_formulario_grupo()
-        self.txtSend.setPlaceholderText(f"Mensaje en {nombre_grupo}...")
-        self.txtMsgs.clear()
-        self.agregar_aviso_sistema(
-            f"Grupo '{nombre_grupo}' creado. Miembros: {', '.join(miembros)}"
+            self._actualizar_permiso_envio_canal(True)
+            self._actualizar_avatar_chat(clave_img_grupo)
+            self.actualizar_indicador_chat()
+
+            self.cerrar_formulario_grupo()
+            self.txtSend.setPlaceholderText(f"Mensaje en {nombre_grupo}...")
+            self.txtMsgs.clear()
+            self.agregar_aviso_sistema(
+                f"Grupo '{nombre_grupo}' creado. Miembros: {', '.join(miembros)}"
+            )
+
+        def _on_err(err):
+            self.btnGuardarGrupo.setEnabled(True)
+            QMessageBox.critical(self, "Error", f"No se pudo crear el grupo:\n{err}")
+
+        self._run_worker(
+            self._crear_grupo_y_consultar,
+            _on_ok,
+            _on_err,
+            nombre_grupo,
+            self.user_id,
+            miembros,
         )
 
-    # ==================== PASO 5: LISTAS Y RENDERIZADO ====================
+    # ==================== LISTAS Y RENDERIZADO ====================
     def refrescar_lista_actual(self):
         if self.categoria_actual == "chats":
             unicos = {}
@@ -555,7 +700,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 if clave_img:
                     item.setIcon(self._obtener_icono_imagen(clave_img))
 
-
             self.modelo_chats.appendRow(item)
 
     def actualizar_indicador_chat(self):
@@ -582,72 +726,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
         elif self.categoria_actual == "canal":
             self.lblIndicadorChat.setText(f"Canal: {usuario}")
 
-    # ==================== PASO 6: SELECCIÓN, ENVÍO Y RECEPCIÓN ====================
-    def _obtener_pixmap_imagen(self, clave_imagen: str | None) -> QPixmap | None:
-        if not hasattr(self, "_cache_imagenes"):
-            self._cache_imagenes = {}
-
-        if not clave_imagen:
-            return None
-
-        clave = str(clave_imagen).strip()
-        if clave in self._cache_imagenes:
-            return self._cache_imagenes[clave]
-
-        ruta = IMAGES_DIR / clave
-        if not ruta.exists():
-            return None
-
-        pixmap = QPixmap(str(ruta))
-        if pixmap.isNull():
-            return None
-
-        self._cache_imagenes[clave] = pixmap
-        return pixmap
-
-    def _obtener_icono_imagen(self, clave_imagen: str | None) -> QIcon:
-        pixmap = self._obtener_pixmap_imagen(clave_imagen)
-        if not pixmap:
-            return QIcon()
-        return QIcon(pixmap)
-
-    def _actualizar_avatar_chat(self, clave_imagen: str | None = None):
-        if not hasattr(self, "lblAvatarChat"):
-            return
-
-        pixmap = self._obtener_pixmap_imagen(clave_imagen)
-        if pixmap:
-            escalado = pixmap.scaled(
-                36,
-                36,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self.lblAvatarChat.setPixmap(escalado)
-        else:
-            self.lblAvatarChat.clear()
-
-    def _actualizar_avatar_usuario_actual(self):
-        if not hasattr(self, "lblAvatarUsuario"):
-            return
-
-        clave_img = None
-        if self.user_name:
-            clave_img = self.imagenes_usuarios.get(self.user_name.strip().lower())
-
-        pixmap = self._obtener_pixmap_imagen(clave_img)
-        if pixmap:
-            escalado = pixmap.scaled(
-                32,
-                32,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self.lblAvatarUsuario.setPixmap(escalado)
-        else:
-            self.lblAvatarUsuario.clear()
-    
-    
+    # ==================== SELECCIÓN, ENVÍO Y RECEPCIÓN ====================
     def user_seleccionado(self, index: QModelIndex):
         data = index.data(Qt.ItemDataRole.UserRole) or index.data()
         if not data:
@@ -656,7 +735,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if hasattr(self, "stackedDerecha"):
             self.stackedDerecha.setCurrentIndex(0)
 
-        # Selección de un grupo
         if self.categoria_actual == "grupos" and isinstance(data, dict):
             self.grupo_activo_id = data["id_grupo"]
             self.canal_activo_id = None
@@ -682,7 +760,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
                     )
             return
 
-        # Selección de un canal
         if self.categoria_actual == "canal" and isinstance(data, dict):
             self.grupo_activo_id = None
             self.canal_activo_id = data["id_canal"]
@@ -713,7 +790,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
                     )
             return
 
-        # Selección de Global o chat privado (1 a 1)
         self.grupo_activo_id = None
         self.canal_activo_id = None
         self.canal_creador_id = None
@@ -742,8 +818,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.txtMsgs.clear()
             self.agregar_aviso_sistema(f"Estás en {usuario}")
 
-
-
     def mensaje_saliente(self):
         texto = self.txtSend.text().strip()
         destino = getattr(self, "usuario_activo", None) or "Global"
@@ -764,7 +838,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
             return
 
         elif self.categoria_actual == "canal":
-
             if not getattr(self, "canal_activo_id", None):
                 self.agregar_aviso_sistema(
                     "Selecciona o crea un canal antes de enviar un mensaje."
@@ -784,17 +857,41 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.txtSend.clear()
             self.agregar_burbuja("Tú", texto, es_mio=True)
             return
-        
+
         elif destino == "Global":
             server.sendall(f"{texto}\n".encode("utf-8"))
             self.historial_global.append(("burbuja", "Tú", texto, True))
-        
+
         else:
             paquete = f"<msg>{destino}|{texto}\n"
             server.sendall(paquete.encode("utf-8"))
 
         self.txtSend.clear()
         self.agregar_burbuja("Tú", texto, es_mio=True)
+
+    def _aplicar_usuarios_bd(self, usuarios_info):
+        if usuarios_info:
+            self.imagenes_usuarios = {
+                u["nombre_usuario"].strip().lower(): u["imagen"]
+                for u in usuarios_info
+                if u.get("nombre_usuario")
+            }
+            bd_lower = {u.lower() for u in self.todos_usuarios_bd}
+            for u in usuarios_info:
+                nombre_bd = u["nombre_usuario"]
+                if nombre_bd.lower() not in bd_lower:
+                    self.todos_usuarios_bd.append(nombre_bd)
+                    bd_lower.add(nombre_bd.lower())
+
+        bd_lower = {u.lower() for u in self.todos_usuarios_bd}
+        for u in self.usuarios_conectados:
+            if u.lower() not in bd_lower:
+                self.todos_usuarios_bd.append(u)
+                bd_lower.add(u.lower())
+
+        self._actualizar_avatar_usuario_actual()
+        self.refrescar_lista_actual()
+        self.actualizar_indicador_chat()
 
     def procesar_mensaje(self, msg: str):
         if msg.startswith("<users>"):
@@ -804,31 +901,9 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.usuarios_conectados = [
                 u.strip() for u in contenido.split(",") if u.strip()
             ]
-
-            # Refrescar mapa de imágenes de usuarios por si hay cuentas nuevas en BD
-            usuarios_info = mssql.obtener_usuarios_con_imagen()
-            if usuarios_info:
-                self.imagenes_usuarios = {
-                    u["nombre_usuario"].strip().lower(): u["imagen"]
-                    for u in usuarios_info
-                    if u.get("nombre_usuario")
-                }
-                bd_lower = {u.lower() for u in self.todos_usuarios_bd}
-                for u in usuarios_info:
-                    nombre_bd = u["nombre_usuario"]
-                    if nombre_bd.lower() not in bd_lower:
-                        self.todos_usuarios_bd.append(nombre_bd)
-                        bd_lower.add(nombre_bd.lower())
-
-            bd_lower = {u.lower() for u in self.todos_usuarios_bd}
-            for u in self.usuarios_conectados:
-                if u.lower() not in bd_lower:
-                    self.todos_usuarios_bd.append(u)
-                    bd_lower.add(u.lower())
-
-            self._actualizar_avatar_usuario_actual()
             self.refrescar_lista_actual()
             self.actualizar_indicador_chat()
+            self._run_worker(mssql.obtener_usuarios_con_imagen, self._aplicar_usuarios_bd)
 
         elif msg.startswith("<nuevo_grupo>"):
             payload = msg.removeprefix("<nuevo_grupo>")
@@ -838,11 +913,16 @@ class MainWindow(QMainWindow, Ui_Messenger):
             )
 
             if self.user_id is not None:
-                self.grupos_disponibles = mssql.obtener_grupos_usuario(self.user_id)
+                def _on_grupos(grupos):
+                    self.grupos_disponibles = grupos
+                    if self.categoria_actual == "grupos":
+                        self.refrescar_lista_actual()
+
+                self._run_worker(mssql.obtener_grupos_usuario, _on_grupos, None, self.user_id)
             elif len(partes) >= 2:
                 id_g_str = partes[0].strip()
                 nom_g = partes[1].strip()
-                if id_g_str.isdigit() and nom_g:
+                if id_g_str.isdigit() and nom_g and hasattr(self, "_agregar_grupo_local"):
                     self._agregar_grupo_local(
                         {
                             "id_grupo": int(id_g_str),
@@ -850,9 +930,8 @@ class MainWindow(QMainWindow, Ui_Messenger):
                             "imagen": clave_img,
                         }
                     )
-
-            if self.categoria_actual == "grupos":
-                self.refrescar_lista_actual()
+                    if self.categoria_actual == "grupos":
+                        self.refrescar_lista_actual()
 
         elif msg == "<!!duplicate!!>":
             if self.coneccion:
@@ -981,7 +1060,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 self.historial_global.append(("sistema", msg))
                 if getattr(self, "usuario_activo", None) == "Global":
                     self.agregar_aviso_sistema(msg)
-
 
     def mostrar_historial_canal(self, raw_data: str):
         try:
@@ -1170,9 +1248,19 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.txtMsgs.verticalScrollBar().maximum()
         )
 
-    def salir(self):
+    def _detener_hilos(self):
         if self.coneccion:
             self.coneccion.stop()
+            self.coneccion = None
+        for worker in list(self._workers):
+            worker.wait(2000)
+
+    def closeEvent(self, event):
+        self._detener_hilos()
+        super().closeEvent(event)
+
+    def salir(self):
+        self._detener_hilos()
         sys.exit()
 
     def showDialog(self):
@@ -1199,7 +1287,6 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.actualizar_indicador_chat()
 
     def _agregar_canal_local(self, canal: dict) -> bool:
-        """Agrega un dict de canal a self.canales_disponibles si no existe. Retorna True si era nuevo."""
         nombre = str(canal.get("nombre_canal", "")).strip()
         id_canal = canal.get("id_canal")
         if not nombre:
@@ -1221,6 +1308,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 "descripcion": str(canal.get("descripcion", "")).strip(),
                 "id_creador": canal.get("id_creador"),
                 "creador": str(canal.get("creador", "")).strip(),
+                "imagen": canal.get("imagen"),
             }
         )
         self.canales_disponibles.sort(
@@ -1229,6 +1317,21 @@ class MainWindow(QMainWindow, Ui_Messenger):
             )
         )
         return True
+
+    def _crear_canal_y_consultar(self, nombre_canal, descripcion_canal, uid):
+        id_canal = mssql.crear_canal_bd(
+            nombre_canal=nombre_canal,
+            descripcion=descripcion_canal,
+            id_creador=uid,
+        )
+        if not id_canal:
+            return None, None
+        canales_bd = mssql.obtener_canales()
+        canal_bd = next(
+            (c for c in canales_bd if int(c["id_canal"]) == int(id_canal)), None
+        )
+        clave_img = canal_bd.get("imagen") if canal_bd else None
+        return id_canal, clave_img
 
     def confirmar_crear_canal(self):
         nombre_canal = self.txtNombreCanal.text().strip()
@@ -1246,70 +1349,74 @@ class MainWindow(QMainWindow, Ui_Messenger):
             )
             return
 
-        # 1. Guardar en SQL Server
-        id_canal = mssql.crear_canal_bd(
-            nombre_canal=nombre_canal,
-            descripcion=descripcion_canal,
-            id_creador=self.user_id,
-        )
-        if not id_canal:
-            QMessageBox.critical(
-                self,
-                "Error al crear canal",
-                "No se pudo guardar el canal (puede que ya exista o haya error en BD).",
-            )
-            return
+        self.btnGuardarCanal.setEnabled(False)
 
-        # Recuperar la clave_imagen asignada aleatoriamente en BD
-        canales_bd = mssql.obtener_canales()
-        canal_bd = next(
-            (c for c in canales_bd if int(c["id_canal"]) == int(id_canal)), None
-        )
-        clave_img = canal_bd.get("imagen") if canal_bd else None
-
-        nuevo_canal = {
-            "id_canal": id_canal,
-            "nombre_canal": nombre_canal,
-            "descripcion": descripcion_canal,
-            "id_creador": self.user_id,
-            "creador": self.user_name,
-            "imagen": clave_img,
-        }
-
-        # 2. Mostrar de inmediato en la lista local
-        self._agregar_canal_local(nuevo_canal)
-        if self.categoria_actual == "canal":
-            self.refrescar_lista_actual()
-
-        # 3. Notificar por socket a los demás usuarios conectados
-        if connected and server:
-            try:
-                paquete = (
-                    f"<nuevo_canal>{id_canal}|{nombre_canal}|"
-                    f"{descripcion_canal}|{self.user_id}|{clave_img}\n"
+        def _on_ok(resultado):
+            self.btnGuardarCanal.setEnabled(True)
+            id_canal, clave_img = resultado
+            if not id_canal:
+                QMessageBox.critical(
+                    self,
+                    "Error al crear canal",
+                    "No se pudo guardar el canal (puede que ya exista o haya error en BD).",
                 )
-                server.sendall(paquete.encode("utf-8"))
-            except OSError as e:
-                print(f"Error al notificar nuevo canal por socket: {e}")
+                return
 
-        # 4. Dejar el canal recién creado activo para su creador
-        self.grupo_activo_id = None
-        self.canal_activo_id = id_canal
-        self.canal_creador_id = self.user_id
-        self.usuario_activo = nombre_canal
+            nuevo_canal = {
+                "id_canal": id_canal,
+                "nombre_canal": nombre_canal,
+                "descripcion": descripcion_canal,
+                "id_creador": self.user_id,
+                "creador": self.user_name,
+                "imagen": clave_img,
+            }
 
-        self._actualizar_permiso_envio_canal(True)
-        self._actualizar_avatar_chat(clave_img)
-        self.actualizar_indicador_chat()
+            self._agregar_canal_local(nuevo_canal)
+            if self.categoria_actual == "canal":
+                self.refrescar_lista_actual()
 
-        self.cerrar_formulario_canal()
-        self.txtSend.setPlaceholderText(f"Mensaje en #{nombre_canal}...")
-        self.txtMsgs.clear()
+            if connected and server:
+                try:
+                    paquete = (
+                        f"<nuevo_canal>{id_canal}|{nombre_canal}|"
+                        f"{descripcion_canal}|{self.user_id}|{clave_img}\n"
+                    )
+                    server.sendall(paquete.encode("utf-8"))
+                except OSError as e:
+                    print(f"Error al notificar nuevo canal por socket: {e}")
 
-        aviso = f"Canal '{nombre_canal}' creado."
-        if descripcion_canal:
-            aviso += f" Descripción: {descripcion_canal}"
-        self.agregar_aviso_sistema(aviso)
+            self.grupo_activo_id = None
+            self.canal_activo_id = id_canal
+            self.canal_creador_id = self.user_id
+            self.usuario_activo = nombre_canal
+
+            self._actualizar_permiso_envio_canal(True)
+            self._actualizar_avatar_chat(clave_img)
+            self.actualizar_indicador_chat()
+
+            self.cerrar_formulario_canal()
+            self.txtSend.setPlaceholderText(f"Mensaje en #{nombre_canal}...")
+            self.txtMsgs.clear()
+
+            aviso = f"Canal '{nombre_canal}' creado."
+            if descripcion_canal:
+                aviso += f" Descripción: {descripcion_canal}"
+            self.agregar_aviso_sistema(aviso)
+
+        def _on_err(err):
+            self.btnGuardarCanal.setEnabled(True)
+            QMessageBox.critical(
+                self, "Error al crear canal", f"Ocurrió un error en BD:\n{err}"
+            )
+
+        self._run_worker(
+            self._crear_canal_y_consultar,
+            _on_ok,
+            _on_err,
+            nombre_canal,
+            descripcion_canal,
+            self.user_id,
+        )
 
     def _actualizar_permiso_envio_canal(self, puede_escribir: bool = True):
         if hasattr(self, "lblSoloCreadorCanal"):
@@ -1334,25 +1441,14 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if respuesta != QMessageBox.StandardButton.Yes:
             return
 
-        if self.coneccion:
-            self.coneccion.stop()
-            self.coneccion = None
-
+        self._detener_hilos()
         self.ventana_login = VentanaLogin()
         self.ventana_login.show()
         self.close()
+
+
 class MiDialogo(QDialog, Ui_Dialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
-
-
-"""
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    login = VentanaLogin()
-    login.show()
-    sys.exit(app.exec())
-
-"""
