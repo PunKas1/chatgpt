@@ -1,8 +1,5 @@
-import pyodbc
-
-import os
 import platform
-
+import pyodbc
 
 
 def _resolver_driver() -> str:
@@ -18,7 +15,6 @@ def _resolver_driver() -> str:
             "SQL Server",
         ]
     else:
-        # Linux y macOS
         candidatos = [
             "ODBC Driver 18 for SQL Server",
             "ODBC Driver 17 for SQL Server",
@@ -37,13 +33,14 @@ def _resolver_driver() -> str:
         f"Drivers detectados: {instalados or 'ninguno'}."
     )
 
+
 def obtener_conexion():
     driver = _resolver_driver()
     host = "3.149.102.2"
-    port=1433
-    uid="esteves"
-    pwd="Punkas123"
-    database="GANADORES"
+    port = 1433
+    uid = "esteves"
+    pwd = "Punkas123"
+    database = "GANADORES"
     conn_str = (
         f"DRIVER={{{driver}}};"
         f"SERVER={host},{port};"
@@ -54,6 +51,7 @@ def obtener_conexion():
         "TrustServerCertificate=yes;"
     )
     return pyodbc.connect(conn_str)
+
 
 def guardar_mensaje(usuario, contenido):
     conexion = obtener_conexion()
@@ -107,8 +105,8 @@ def recuperarHistorialUnoAUno(
             historial.append(
                 {
                     "id_mensaje": fila.id_mensaje,
-                    "remitente": fila.remitente,
-                    "destinatario": fila.destinatario,
+                    "remitente": fila.remitente.strip(),
+                    "destinatario": fila.destinatario.strip(),
                     "contenido": fila.contenido,
                     "fecha_envio": (
                         fila.fecha_envio.isoformat()
@@ -124,6 +122,7 @@ def recuperarHistorialUnoAUno(
             cursor.close()
         conexion.close()
 
+
 def _obtener_id_imagen_aleatoria(cursor) -> int | None:
     """Selecciona un id_imagen aleatorio de dbo.ImagenesPerfil usando la conexión activa."""
     cursor.execute("SELECT TOP 1 id_imagen FROM dbo.ImagenesPerfil ORDER BY NEWID()")
@@ -135,9 +134,10 @@ def crear_usuario(nombre_usuario, contrasena):
     conexion = obtener_conexion()
     try:
         cursor = conexion.cursor()
+        usuario_limpio = nombre_usuario.strip()
         cursor.execute(
-            "SELECT id_usuario FROM dbo.Usuarios WHERE nombre_usuario = ?",
-            (nombre_usuario,),
+            "SELECT id_usuario FROM dbo.Usuarios WHERE LOWER(nombre_usuario) = LOWER(?)",
+            (usuario_limpio,),
         )
         if cursor.fetchone():
             return False
@@ -145,7 +145,7 @@ def crear_usuario(nombre_usuario, contrasena):
         id_imagen = _obtener_id_imagen_aleatoria(cursor)
         cursor.execute(
             "INSERT INTO dbo.Usuarios (nombre_usuario, contrasena, id_imagen) VALUES (?, ?, ?)",
-            (nombre_usuario, contrasena, id_imagen),
+            (usuario_limpio, contrasena.strip(), id_imagen),
         )
         conexion.commit()
         return True
@@ -160,9 +160,12 @@ def autenticar_usuario(nombre_usuario, contrasena):
         cursor = conexion.cursor()
         cursor.execute(
             "SELECT id_usuario, nombre_usuario FROM dbo.Usuarios WHERE nombre_usuario = ? AND contrasena = ?",
-            (nombre_usuario, contrasena),
+            (nombre_usuario.strip(), contrasena.strip()),
         )
-        return cursor.fetchone()
+        fila = cursor.fetchone()
+        if not fila:
+            return None
+        return int(fila[0]), fila[1].strip()
     finally:
         conexion.close()
 
@@ -192,7 +195,6 @@ def guardarMensajeUnoAUno(
     try:
         cursor = conexion.cursor()
 
-        # 1. Resolver id_remitente e id_destinatario desde la tabla de usuarios
         cursor.execute(
             """
             SELECT id_usuario, nombre_usuario
@@ -213,7 +215,6 @@ def guardarMensajeUnoAUno(
             )
             return False
 
-        # 2. Insertar incluyendo id_usuario (NOT NULL en la tabla Mensajes)
         cursor.execute(
             """
             INSERT INTO Mensajes (id_usuario, id_remitente, id_destinatario, contenido, fecha_envio)
@@ -234,7 +235,9 @@ def guardarMensajeUnoAUno(
         conexion.close()
 
 
-def crear_grupo_bd(nombre_grupo: str, id_creador: int, nombres_miembros: list[str]) -> int | None:
+def crear_grupo_bd(
+    nombre_grupo: str, id_creador: int, nombres_miembros: list[str]
+) -> int | None:
     """Crea el grupo, agrega al creador y a los miembros seleccionados. Retorna id_grupo."""
     conexion = obtener_conexion()
     cursor = None
@@ -250,7 +253,6 @@ def crear_grupo_bd(nombre_grupo: str, id_creador: int, nombres_miembros: list[st
             return None
         id_grupo = int(fila_grupo[0])
 
-        # Resolver IDs de todos los miembros seleccionados + asegurar al creador
         ids_miembros = {int(id_creador)}
         for nombre in nombres_miembros:
             cursor.execute(
@@ -277,7 +279,6 @@ def crear_grupo_bd(nombre_grupo: str, id_creador: int, nombres_miembros: list[st
         if cursor is not None:
             cursor.close()
         conexion.close()
-
 
 
 def obtener_miembros_grupo(id_grupo: int) -> list[str]:
@@ -319,7 +320,7 @@ def guardar_mensaje_grupo(id_grupo: int, remitente: str, contenido: str) -> bool
         )
         row = cursor.fetchone()
         if not row:
-            return False  # No pertenece al grupo, no tiene permiso
+            return False
 
         id_remitente = int(row[0])
         cursor.execute(
@@ -347,7 +348,6 @@ def recuperar_historial_grupo(id_grupo: int, usuario_solicitante: str) -> list[d
     cursor = None
     try:
         cursor = conexion.cursor()
-        # Verificar membresía
         cursor.execute(
             """
             SELECT 1
@@ -373,7 +373,7 @@ def recuperar_historial_grupo(id_grupo: int, usuario_solicitante: str) -> list[d
         return [
             {
                 "id_mensaje": fila.id_mensaje,
-                "remitente": fila.remitente,
+                "remitente": fila.remitente.strip(),
                 "contenido": fila.contenido,
                 "fecha_envio": fila.fecha_envio.isoformat() if fila.fecha_envio else None,
             }
@@ -383,6 +383,7 @@ def recuperar_historial_grupo(id_grupo: int, usuario_solicitante: str) -> list[d
         if cursor is not None:
             cursor.close()
         conexion.close()
+
 
 def crear_canal_bd(
     nombre_canal: str, descripcion: str, id_creador: int
@@ -396,7 +397,6 @@ def crear_canal_bd(
         nombre_limpio = nombre_canal.strip()
         desc_limpia = descripcion.strip() if descripcion else None
 
-        # Evitar duplicados por nombre (case-insensitive)
         cursor.execute(
             "SELECT id_canal FROM dbo.Canales WHERE LOWER(nombre_canal) = LOWER(?)",
             (nombre_limpio,),
@@ -430,8 +430,6 @@ def crear_canal_bd(
         conexion.close()
 
 
-
-
 def guardar_mensaje_canal(
     id_canal: int, remitente: str, contenido: str
 ) -> bool:
@@ -456,7 +454,6 @@ def guardar_mensaje_canal(
         id_usuario = int(fila[0])
         id_creador = int(fila[1])
 
-        # Regla: solo el creador del canal puede publicar
         if id_usuario != id_creador:
             return False
 
@@ -552,6 +549,7 @@ def obtener_usuarios_con_imagen() -> list[dict]:
         if cursor is not None:
             cursor.close()
         conexion.close()
+
 
 def obtener_grupos_usuario(id_usuario: int) -> list[dict]:
     """Retorna únicamente los grupos donde el usuario es miembro, con su imagen."""

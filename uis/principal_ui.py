@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, Qt, QSize
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
@@ -17,8 +17,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-
 
 
 class Ui_Messenger(object):
@@ -310,9 +308,8 @@ class Ui_Messenger(object):
         self.headerChatLayout.addWidget(self.lblIndicadorChat, 1)
 
         self.rightPanel.addLayout(self.headerChatLayout)
-        self.rightPanel.addWidget(self.lblIndicadorChat)
 
-        # Contenedor apilado: Página 0 = Chat | Página 1 = Formulario Crear Grupo
+        # Contenedor apilado: Página 0 = Chat | Página 1 = Formulario Crear Grupo | Página 2 = Formulario Crear Canal
         self.stackedDerecha = QStackedWidget(self.centralwidget)
         self.stackedDerecha.setObjectName("stackedDerecha")
 
@@ -415,9 +412,6 @@ class Ui_Messenger(object):
         self.pageGrupoOuter.addWidget(self.cardFormGrupo)
         self.stackedDerecha.addWidget(self.pageCrearGrupo)
 
-        self.rightPanel.addWidget(self.stackedDerecha)
-        self.mainLayout.addLayout(self.rightPanel, 2)
-
         # --- PÁGINA 2: FORMULARIO CREAR CANAL ---
         self.pageCrearCanal = QWidget()
         self.pageCanalOuter = QVBoxLayout(self.pageCrearCanal)
@@ -471,6 +465,9 @@ class Ui_Messenger(object):
 
         self.pageCanalOuter.addWidget(self.cardFormCanal)
         self.stackedDerecha.addWidget(self.pageCrearCanal)
+
+        self.rightPanel.addWidget(self.stackedDerecha)
+        self.mainLayout.addLayout(self.rightPanel, 2)
 
         Messenger.setCentralWidget(self.centralwidget)
 

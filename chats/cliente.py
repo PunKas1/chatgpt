@@ -1,6 +1,5 @@
 import html
 import json
-import re
 import socket
 import sys
 from pathlib import Path
@@ -9,76 +8,52 @@ from PySide6.QtCore import QModelIndex, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap, QStandardItem, QStandardItemModel, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QWidget,
 )
 
-from dbs import mssql
 from uis.conectar_ui import *
 from uis.iniciarSesion_ui import *
 from uis.principal_ui import *
 
 BUFFER_SIZE = 1024
-server = None
-connected = False
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 IMAGES_DIR = BASE_DIR / "images"
 
 
-class WorkerBD(QThread):
-    finished_ok = Signal(object)
-    finished_err = Signal(str)
-
-    def __init__(self, fn, *args, parent=None, **kwargs):
-        super().__init__(parent)
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-
-    def run(self):
-        try:
-            resultado = self.fn(*self.args, **self.kwargs)
-            self.finished_ok.emit(resultado)
-        except Exception as exc:
-            self.finished_err.emit(str(exc))
-
-
 class ThreadSocket(QThread):
+    signal_connected = Signal()
     signal_message = Signal(str)
     signal_error = Signal(str)
 
-    def __init__(self, host, port, user_id, name, parent=None):
+    def __init__(self, host: str, port: int, parent=None):
         super().__init__(parent)
         self.host = host
         self.port = port
-        self.user_id = user_id
-        self.name = name
         self._running = True
         self.sock = None
+        self.connected = False
 
     def run(self):
-        global connected, server
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
             sock.connect((self.host, self.port))
             sock.settimeout(1.0)
             self.sock = sock
-            server = sock
-            connected = True
-            sock.sendall(f"<name>{self.user_id}|{self.name}\n".encode("utf-8"))
+            self.connected = True
+            self.signal_connected.emit()
         except OSError as e:
-            connected = False
+            self.connected = False
             self.signal_error.emit(str(e))
             return
 
         buffer = ""
         try:
-            while self._running and connected:
+            while self._running and self.connected:
                 try:
                     chunk = sock.recv(BUFFER_SIZE)
                 except socket.timeout:
@@ -98,18 +73,27 @@ class ThreadSocket(QThread):
             if self._running:
                 self.signal_message.emit("<!!error!!>")
         finally:
-            connected = False
+            self.connected = False
             try:
                 sock.close()
             except OSError:
                 pass
-            if server is sock:
-                server = None
+
+    def enviar(self, texto: str) -> bool:
+        if not self.connected or not self.sock:
+            return False
+        try:
+            if not texto.endswith("\n"):
+                texto += "\n"
+            self.sock.sendall(texto.encode("utf-8"))
+            return True
+        except OSError:
+            self.connected = False
+            return False
 
     def stop(self):
-        global connected
         self._running = False
-        connected = False
+        self.connected = False
         if self.sock:
             try:
                 self.sock.shutdown(socket.SHUT_RDWR)
@@ -128,66 +112,17 @@ class VentanaLogin(QWidget, Ui_Form):
         super().__init__()
         self.setupUi(self)
         self.ventana_principal = None
-        self._workers = []
+        self.coneccion = None
+        self._login_exitoso = False
 
-        self.bton_login.clicked.connect(self.iniciar_sesion)
-        self.bton_crear.clicked.connect(self.crear_cuenta)
+        self.bton_login.clicked.connect(lambda: self._conectar_y_enviar("login"))
+        self.bton_crear.clicked.connect(lambda: self._conectar_y_enviar("registro"))
 
-    def _run_worker(self, fn, on_ok, on_err, *args, **kwargs):
-        worker = WorkerBD(fn, *args, parent=self, **kwargs)
-        self._workers.append(worker)
+    def _set_botones(self, estado: bool):
+        self.bton_login.setEnabled(estado)
+        self.bton_crear.setEnabled(estado)
 
-        def _cleanup():
-            if worker in self._workers:
-                self._workers.remove(worker)
-            worker.deleteLater()
-
-        worker.finished_ok.connect(on_ok)
-        worker.finished_err.connect(on_err)
-        worker.finished.connect(_cleanup)
-        worker.start()
-
-    def crear_cuenta(self):
-        usuario = self.lineEdit.text().strip()
-        contrasena = self.lineEdit_2.text().strip()
-
-        if not usuario or not contrasena:
-            QMessageBox.warning(
-                self, "Campos vacíos", "Ingresa un usuario y una contraseña."
-            )
-            return
-
-        self.bton_crear.setEnabled(False)
-        self.bton_login.setEnabled(False)
-
-        def _on_ok(creado):
-            self.bton_crear.setEnabled(True)
-            self.bton_login.setEnabled(True)
-            if creado:
-                QMessageBox.information(
-                    self,
-                    "Cuenta creada",
-                    f"El usuario '{usuario}' se registró correctamente.",
-                )
-            else:
-                QMessageBox.warning(
-                    self,
-                    "Usuario existente",
-                    "Ese nombre de usuario ya está registrado.",
-                )
-
-        def _on_err(err):
-            self.bton_crear.setEnabled(True)
-            self.bton_login.setEnabled(True)
-            QMessageBox.critical(
-                self,
-                "Error de base de datos",
-                f"No se pudo crear la cuenta:\n{err}",
-            )
-
-        self._run_worker(mssql.crear_usuario, _on_ok, _on_err, usuario, contrasena)
-
-    def iniciar_sesion(self):
+    def _conectar_y_enviar(self, accion: str):
         usuario = self.lineEdit.text().strip()
         contrasena = self.lineEdit_2.text().strip()
         host = self.lineEdit_3.text().strip()
@@ -207,40 +142,102 @@ class VentanaLogin(QWidget, Ui_Form):
             )
             return
 
-        self.bton_login.setEnabled(False)
-        self.bton_crear.setEnabled(False)
+        self._set_botones(False)
+        if self.coneccion:
+            self.coneccion.stop()
 
-        def _on_ok(datos_usuario):
-            self.bton_login.setEnabled(True)
-            self.bton_crear.setEnabled(True)
-            if not datos_usuario:
-                QMessageBox.warning(
-                    self,
-                    "Acceso denegado",
-                    "Usuario o contraseña incorrectos.",
+        sock_thread = ThreadSocket(host, int(port), parent=self)
+        self.coneccion = sock_thread
+        payload = json.dumps(
+            {"usuario": usuario, "contrasena": contrasena}, ensure_ascii=False
+        )
+
+        sock_thread.signal_connected.connect(
+            lambda: sock_thread.enviar(f"<{accion}>{payload}")
+        )
+        sock_thread.signal_message.connect(self._procesar_respuesta_auth)
+        sock_thread.signal_error.connect(self._on_error_red)
+        sock_thread.start()
+
+    def _procesar_respuesta_auth(self, linea: str):
+        if linea.startswith("<registro_ok>"):
+            self._set_botones(True)
+            if self.coneccion:
+                self.coneccion.stop()
+                self.coneccion = None
+            QMessageBox.information(
+                self,
+                "Cuenta creada",
+                "El usuario se registró correctamente. Ahora puedes iniciar sesión.",
+            )
+
+        elif linea.startswith("<registro_err>"):
+            self._set_botones(True)
+            if self.coneccion:
+                self.coneccion.stop()
+                self.coneccion = None
+            motivo = (
+                linea.removeprefix("<registro_err>").strip()
+                or "Ese nombre de usuario ya está registrado."
+            )
+            QMessageBox.warning(self, "Error de registro", motivo)
+
+        elif linea.startswith("<login_ok>"):
+            try:
+                datos = json.loads(linea.removeprefix("<login_ok>").strip())
+            except json.JSONDecodeError:
+                self._set_botones(True)
+                QMessageBox.critical(
+                    self, "Error de protocolo", "Respuesta inválida del servidor."
                 )
                 return
 
-            id_usuario, nombre_usuario = datos_usuario
+            self.coneccion.signal_message.disconnect(self._procesar_respuesta_auth)
+            self.coneccion.signal_error.disconnect(self._on_error_red)
+
+            self._login_exitoso = True
             self.ventana_principal = MainWindow(
-                user_id=id_usuario,
-                user_name=nombre_usuario,
-                host=host,
-                port=int(port),
+                user_id=datos["user_id"],
+                user_name=datos["user_name"],
+                coneccion=self.coneccion,
             )
+            self.coneccion.setParent(self.ventana_principal)
             self.ventana_principal.show()
             self.close()
 
-        def _on_err(err):
-            self.bton_login.setEnabled(True)
-            self.bton_crear.setEnabled(True)
+        elif linea.startswith("<login_err>"):
+            self._set_botones(True)
+            if self.coneccion:
+                self.coneccion.stop()
+                self.coneccion = None
+            motivo = (
+                linea.removeprefix("<login_err>").strip()
+                or "Usuario o contraseña incorrectos."
+            )
+            QMessageBox.warning(self, "Acceso denegado", motivo)
+
+        elif linea in ("<!!disconected!!>", "<!!error!!>"):
+            self._set_botones(True)
+            if self.coneccion:
+                self.coneccion.stop()
+                self.coneccion = None
             QMessageBox.critical(
-                self, "Error", f"Ocurrió un error al iniciar sesión:\n{err}"
+                self, "Desconectado", "Se perdió la conexión con el servidor."
             )
 
-        self._run_worker(
-            mssql.autenticar_usuario, _on_ok, _on_err, usuario, contrasena
+    def _on_error_red(self, err: str):
+        self._set_botones(True)
+        if self.coneccion:
+            self.coneccion.stop()
+            self.coneccion = None
+        QMessageBox.critical(
+            self, "Error de conexión", f"No se pudo conectar al servidor:\n{err}"
         )
+
+    def closeEvent(self, event):
+        if not self._login_exitoso and self.coneccion:
+            self.coneccion.stop()
+        super().closeEvent(event)
 
 
 class MainWindow(QMainWindow, Ui_Messenger):
@@ -248,35 +245,34 @@ class MainWindow(QMainWindow, Ui_Messenger):
     def __init__(
         self,
         user_id=None,
-        user_name="",
-        host=None,
-        port=None,
+        user_name: str = "",
+        coneccion: ThreadSocket | None = None,
         *args,
         **kwargs,
     ):
-        QMainWindow.__init__(self, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.setupUi(self)
         self.user_id = user_id
         self.user_name = user_name
+        self.coneccion = coneccion
+
         self.usuario_activo = "Global"
         self.grupo_activo_id = None
         self.canal_activo_id = None
         self.canal_creador_id = None
         self.categoria_actual = "chats"
+
         self.usuarios_conectados = []
         self.todos_usuarios_bd = []
         self.historial_global = []
         self.grupos_disponibles = []
         self.canales_disponibles = []
-        self._workers = []
+        self.imagenes_usuarios = {}
         self._cache_imagenes = {}
 
         self.actionSalir.triggered.connect(self.salir)
-        self.coneccion = None
         self.btnSend.clicked.connect(self.mensaje_saliente)
-        self.setWindowTitle("Messenger - Desconectado")
         self.txtSend.returnPressed.connect(self.mensaje_saliente)
-        self.imagenes_usuarios = {}
 
         if hasattr(self, "listaChats"):
             self.listaChats.setIconSize(QSize(30, 30))
@@ -320,74 +316,24 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if hasattr(self, "lblIndicadorChat"):
             self.lblIndicadorChat.setText("Chat actual: Global")
         self.txtSend.setPlaceholderText("Mensaje en Global...")
-        self.refrescar_lista_actual()
 
-        if host and port and user_name:
-            self.conectar_servidor(host, port, user_id, user_name)
-
-    def _run_worker(self, fn, on_ok, on_err=None, *args, **kwargs):
-        worker = WorkerBD(fn, *args, parent=self, **kwargs)
-        self._workers.append(worker)
-
-        def _cleanup():
-            if worker in self._workers:
-                self._workers.remove(worker)
-            worker.deleteLater()
-
-        worker.finished_ok.connect(on_ok)
-        if on_err:
-            worker.finished_err.connect(on_err)
+        if self.esta_conectado:
+            self.coneccion.signal_message.connect(self.procesar_mensaje)
+            self.coneccion.signal_error.connect(
+                lambda err: self.agregar_aviso_sistema(f"[Error de socket: {err}]")
+            )
+            self.setWindowTitle(f"Messenger - Conectado ({user_name})")
+            self.coneccion.enviar("<init_data>")
         else:
-            worker.finished_err.connect(lambda err: print(f"Error en hilo BD: {err}"))
-        worker.finished.connect(_cleanup)
-        worker.start()
+            self.setWindowTitle("Messenger - Desconectado")
 
-    def _consultar_datos_iniciales(self, uid):
-        usuarios_info = mssql.obtener_usuarios_con_imagen()
-        canales = mssql.obtener_canales()
-        grupos = mssql.obtener_grupos_usuario(uid) if uid is not None else []
-        return usuarios_info, canales, grupos
-
-    def conectar_servidor(self, host, port, user_id, user_name):
-        self.user_id = user_id
-        self.user_name = user_name
-        self.cargar_usuarios_bd()
-
-        if self.coneccion:
-            self.coneccion.stop()
-
-        self.coneccion = ThreadSocket(host, port, user_id, user_name, parent=self)
-        self.coneccion.signal_message.connect(self.procesar_mensaje)
-        self.coneccion.signal_error.connect(
-            lambda err: self.agregar_aviso_sistema(f"[Error de socket: {err}]")
-        )
-        self.coneccion.start()
-        self.setWindowTitle(f"Messenger - Conectado ({user_name})")
-        if hasattr(self, "lblUserConectado"):
-            self.lblUserConectado.setText(f"Usuario: {user_name}")
         self.refrescar_lista_actual()
 
-    def cargar_usuarios_bd(self):
-        def _aplicar(resultado):
-            usuarios_info, canales, grupos = resultado
-            self.todos_usuarios_bd = [u["nombre_usuario"] for u in usuarios_info]
-            self.imagenes_usuarios = {
-                u["nombre_usuario"].strip().lower(): u["imagen"]
-                for u in usuarios_info
-                if u.get("nombre_usuario")
-            }
-            self.canales_disponibles = canales
-            self.grupos_disponibles = grupos
-            self._actualizar_avatar_usuario_actual()
-            self.refrescar_lista_actual()
+    @property
+    def esta_conectado(self) -> bool:
+        return bool(self.coneccion and self.coneccion.connected)
 
-        self._run_worker(
-            self._consultar_datos_iniciales,
-            _aplicar,
-            lambda err: print(f"Error al cargar datos de BD: {err}"),
-            self.user_id,
-        )
-
+    # ==================== IMÁGENES Y AVATARES ====================
     def _obtener_pixmap_imagen(self, clave_imagen: str | None) -> QPixmap | None:
         if not clave_imagen:
             return None
@@ -449,6 +395,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
         else:
             self.lblAvatarUsuario.clear()
 
+    # ==================== NAVEGACIÓN DE PESTAÑAS ====================
     def cambiar_pestana(self, pestana: str):
         self.categoria_actual = pestana
         botones = {
@@ -495,8 +442,21 @@ class MainWindow(QMainWindow, Ui_Messenger):
             )
             if hasattr(self, "lblIndicadorChat"):
                 self.lblIndicadorChat.setText("Canales")
+        elif pestana == "chats":
+            self.usuario_activo = "Global"
+            self.actualizar_indicador_chat()
+            self.txtSend.setPlaceholderText("Mensaje en Global...")
+            self.mostrar_global()
 
         self.refrescar_lista_actual()
+
+    def _actualizar_permiso_envio_canal(self, permitido: bool):
+        self.txtSend.setEnabled(permitido)
+        self.btnSend.setEnabled(permitido)
+        if not permitido:
+            self.txtSend.setPlaceholderText(
+                "Solo el creador puede enviar mensajes en este canal."
+            )
 
     # ==================== FORMULARIO CREAR GRUPO ====================
     def abrir_formulario_grupo(self):
@@ -515,20 +475,16 @@ class MainWindow(QMainWindow, Ui_Messenger):
             item.setCheckState(Qt.CheckState.Unchecked)
             self.listaMiembrosGrupo.addItem(item)
 
-        self.lblIndicadorChat.setText("Nuevo grupo")
-        self.stackedDerecha.setCurrentIndex(1)
+        if hasattr(self, "lblIndicadorChat"):
+            self.lblIndicadorChat.setText("Nuevo grupo")
+        if hasattr(self, "stackedDerecha"):
+            self.stackedDerecha.setCurrentIndex(1)
         self.txtNombreGrupo.setFocus()
 
     def cerrar_formulario_grupo(self):
-        self.stackedDerecha.setCurrentIndex(0)
+        if hasattr(self, "stackedDerecha"):
+            self.stackedDerecha.setCurrentIndex(0)
         self.actualizar_indicador_chat()
-
-    def _crear_grupo_y_consultar(self, nombre_grupo, uid, miembros):
-        id_grupo = mssql.crear_grupo_bd(nombre_grupo, uid, miembros)
-        if not id_grupo:
-            return None, []
-        grupos = mssql.obtener_grupos_usuario(uid) if uid is not None else []
-        return id_grupo, grupos
 
     def confirmar_crear_grupo(self):
         nombre_grupo = self.txtNombreGrupo.text().strip()
@@ -550,64 +506,63 @@ class MainWindow(QMainWindow, Ui_Messenger):
             )
             return
 
-        self.btnGuardarGrupo.setEnabled(False)
-
-        def _on_ok(resultado):
-            self.btnGuardarGrupo.setEnabled(True)
-            id_grupo, grupos = resultado
-            if not id_grupo:
-                QMessageBox.critical(
-                    self, "Error", "No se pudo guardar el grupo en la base de datos."
-                )
-                return
-
-            self.grupos_disponibles = grupos
-            grupo_creado = next(
-                (g for g in self.grupos_disponibles if int(g["id_grupo"]) == int(id_grupo)),
-                None,
+        if not self.esta_conectado:
+            QMessageBox.warning(
+                self, "Sin conexión", "No estás conectado al servidor."
             )
-            clave_img_grupo = grupo_creado.get("imagen") if grupo_creado else None
+            return
 
-            if connected and server:
-                try:
-                    lista_csv = ",".join(miembros)
-                    paquete = (
-                        f"<nuevo_grupo>{id_grupo}|{nombre_grupo}|"
-                        f"{lista_csv}|{clave_img_grupo or ''}\n"
-                    )
-                    server.sendall(paquete.encode("utf-8"))
-                except OSError as e:
-                    print(f"Error al notificar nuevo grupo por socket: {e}")
-
-            self.refrescar_lista_actual()
-            self.grupo_activo_id = id_grupo
-            self.canal_activo_id = None
-            self.canal_creador_id = None
-            self.usuario_activo = nombre_grupo
-
-            self._actualizar_permiso_envio_canal(True)
-            self._actualizar_avatar_chat(clave_img_grupo)
-            self.actualizar_indicador_chat()
-
-            self.cerrar_formulario_grupo()
-            self.txtSend.setPlaceholderText(f"Mensaje en {nombre_grupo}...")
-            self.txtMsgs.clear()
-            self.agregar_aviso_sistema(
-                f"Grupo '{nombre_grupo}' creado. Miembros: {', '.join(miembros)}"
-            )
-
-        def _on_err(err):
-            self.btnGuardarGrupo.setEnabled(True)
-            QMessageBox.critical(self, "Error", f"No se pudo crear el grupo:\n{err}")
-
-        self._run_worker(
-            self._crear_grupo_y_consultar,
-            _on_ok,
-            _on_err,
-            nombre_grupo,
-            self.user_id,
-            miembros,
+        payload = json.dumps(
+            {"nombre": nombre_grupo, "miembros": miembros}, ensure_ascii=False
         )
+        if self.coneccion.enviar(f"<crear_grupo>{payload}"):
+            self.btnGuardarGrupo.setEnabled(False)
+
+    # ==================== FORMULARIO CREAR CANAL ====================
+    def abrir_formulario_canal(self):
+        if hasattr(self, "txtNombreCanal"):
+            self.txtNombreCanal.clear()
+        if hasattr(self, "txtDescripcionCanal"):
+            self.txtDescripcionCanal.clear()
+        if hasattr(self, "lblIndicadorChat"):
+            self.lblIndicadorChat.setText("Nuevo canal")
+        if hasattr(self, "stackedDerecha"):
+            indice_canal = 2 if self.stackedDerecha.count() > 2 else 1
+            self.stackedDerecha.setCurrentIndex(indice_canal)
+        if hasattr(self, "txtNombreCanal"):
+            self.txtNombreCanal.setFocus()
+
+    def cerrar_formulario_canal(self):
+        if hasattr(self, "stackedDerecha"):
+            self.stackedDerecha.setCurrentIndex(0)
+        self.actualizar_indicador_chat()
+
+    def confirmar_crear_canal(self):
+        nombre_canal = (
+            self.txtNombreCanal.text().strip()
+            if hasattr(self, "txtNombreCanal")
+            else ""
+        )
+        if not nombre_canal:
+            QMessageBox.warning(
+                self, "Falta nombre", "Escribe un nombre para el canal."
+            )
+            return
+
+        if not self.esta_conectado:
+            QMessageBox.warning(
+                self, "Sin conexión", "No estás conectado al servidor."
+            )
+            return
+
+        datos_canal = {"nombre": nombre_canal}
+        if hasattr(self, "txtDescripcionCanal"):
+            datos_canal["descripcion"] = self.txtDescripcionCanal.text().strip()
+
+        payload = json.dumps(datos_canal, ensure_ascii=False)
+        if self.coneccion.enviar(f"<crear_canal>{payload}"):
+            if hasattr(self, "btnGuardarCanal"):
+                self.btnGuardarCanal.setEnabled(False)
 
     # ==================== LISTAS Y RENDERIZADO ====================
     def refrescar_lista_actual(self):
@@ -680,14 +635,17 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 elif usuario_str.lower() == mi_usuario_lower:
                     icono = (
                         "🟢"
-                        if (connected or usuario_str.lower() in conectados_lower)
-                        else "⚪"
+                        if (
+                            self.esta_conectado
+                            or usuario_str.lower() in conectados_lower
+                        )
+                        else "🔴"
                     )
                     texto_visible = f"{icono} {usuario_str} (tú)"
                 elif usuario_str.lower() in conectados_lower:
                     texto_visible = f"🟢 {usuario_str}"
                 else:
-                    texto_visible = f"⚪ {usuario_str}"
+                    texto_visible = f"🔴 {usuario_str}"
             else:
                 texto_visible = usuario_str
 
@@ -719,12 +677,61 @@ class MainWindow(QMainWindow, Ui_Messenger):
             etiqueta = f"{usuario} (tú)" if es_yo else usuario
             estado = (
                 "🟢 En línea"
-                if (es_yo and connected) or (usuario.lower() in conectados_lower)
-                else "⚪ Desconectado"
+                if (es_yo and self.esta_conectado)
+                or (usuario.lower() in conectados_lower)
+                else "🔴 Desconectado"
             )
             self.lblIndicadorChat.setText(f"Chat actual: {etiqueta} · {estado}")
         elif self.categoria_actual == "canal":
-            self.lblIndicadorChat.setText(f"Canal: {usuario}")
+            if getattr(self, "canal_activo_id", None):
+                self.lblIndicadorChat.setText(f"Canal: {usuario}")
+            else:
+                self.lblIndicadorChat.setText("Canales")
+
+    # ==================== BURBUJAS Y MENSAJES EN PANTALLA ====================
+    def agregar_aviso_sistema(self, texto: str):
+        seguro = html.escape(texto)
+        bloque = (
+            '<div style="text-align:center; color:#888888; font-size:12px; '
+            f'margin:6px 0;"><i>{seguro}</i></div>'
+        )
+        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+        self.txtMsgs.insertHtml(bloque + "<br>")
+        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+
+    def agregar_burbuja(self, remitente: str, texto: str, es_mio: bool = False):
+        rem_seguro = html.escape(remitente)
+        txt_seguro = html.escape(texto).replace("\n", "<br>")
+        if es_mio:
+            bloque = (
+                '<div style="text-align:right; margin:6px 10px;">'
+                '<span style="display:inline-block; background-color:#2b5278; '
+                "color:#ffffff; padding:8px 12px; border-radius:10px; "
+                f'max-width:70%; text-align:left;">'
+                f'<b style="font-size:11px; color:#a8d1ff;">{rem_seguro}</b><br>'
+                f"{txt_seguro}</span></div>"
+            )
+        else:
+            bloque = (
+                '<div style="text-align:left; margin:6px 10px;">'
+                '<span style="display:inline-block; background-color:#26292e; '
+                "color:#f1f1f1; padding:8px 12px; border-radius:10px; "
+                f'max-width:70%; text-align:left;">'
+                f'<b style="font-size:11px; color:#6ab2f2;">{rem_seguro}</b><br>'
+                f"{txt_seguro}</span></div>"
+            )
+        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+        self.txtMsgs.insertHtml(bloque + "<br>")
+        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+
+    def mostrar_global(self):
+        self.txtMsgs.clear()
+        for entrada in self.historial_global:
+            if entrada[0] == "burbuja":
+                _, remitente, texto, es_mio = entrada
+                self.agregar_burbuja(remitente, texto, es_mio=es_mio)
+            elif entrada[0] == "aviso":
+                self.agregar_aviso_sistema(entrada[1])
 
     # ==================== SELECCIÓN, ENVÍO Y RECEPCIÓN ====================
     def user_seleccionado(self, index: QModelIndex):
@@ -749,14 +756,12 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.txtSend.setFocus()
             self.txtMsgs.clear()
 
-            if connected and server:
-                try:
-                    server.sendall(
-                        f"<historial_grupo>{self.grupo_activo_id}\n".encode("utf-8")
-                    )
-                except OSError as e:
+            if self.esta_conectado:
+                if not self.coneccion.enviar(
+                    f"<historial_grupo>{self.grupo_activo_id}"
+                ):
                     self.agregar_aviso_sistema(
-                        f"[Error al pedir historial del grupo: {e}]"
+                        "[Error al pedir historial del grupo]"
                     )
             return
 
@@ -774,19 +779,17 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self._actualizar_avatar_chat(data.get("imagen"))
             self.actualizar_indicador_chat()
 
-            self.txtSend.setPlaceholderText(f"Mensaje en #{self.usuario_activo}...")
             if es_creador:
+                self.txtSend.setPlaceholderText(f"Mensaje en #{self.usuario_activo}...")
                 self.txtSend.setFocus()
             self.txtMsgs.clear()
 
-            if connected and server:
-                try:
-                    server.sendall(
-                        f"<historial_canal>{self.canal_activo_id}\n".encode("utf-8")
-                    )
-                except OSError as e:
+            if self.esta_conectado:
+                if not self.coneccion.enviar(
+                    f"<historial_canal>{self.canal_activo_id}"
+                ):
                     self.agregar_aviso_sistema(
-                        f"[Error al pedir historial del canal: {e}]"
+                        "[Error al pedir historial del canal]"
                     )
             return
 
@@ -808,12 +811,10 @@ class MainWindow(QMainWindow, Ui_Messenger):
 
         if usuario == "Global":
             self.mostrar_global()
-        elif self.categoria_actual == "chats" and connected and server:
+        elif self.categoria_actual == "chats" and self.esta_conectado:
             self.txtMsgs.clear()
-            try:
-                server.sendall(f"<historial>{usuario}\n".encode("utf-8"))
-            except OSError as e:
-                self.agregar_aviso_sistema(f"[Error al pedir historial: {e}]")
+            if not self.coneccion.enviar(f"<historial>{usuario}"):
+                self.agregar_aviso_sistema("[Error al pedir historial]")
         else:
             self.txtMsgs.clear()
             self.agregar_aviso_sistema(f"Estás en {usuario}")
@@ -821,7 +822,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
     def mensaje_saliente(self):
         texto = self.txtSend.text().strip()
         destino = getattr(self, "usuario_activo", None) or "Global"
-        if not texto or not connected or not server:
+        if not texto or not self.esta_conectado:
             return
 
         if self.categoria_actual == "grupos":
@@ -830,14 +831,12 @@ class MainWindow(QMainWindow, Ui_Messenger):
                     "Selecciona o crea un grupo antes de enviar un mensaje."
                 )
                 return
-            server.sendall(
-                f"<grupo_msg>{self.grupo_activo_id}|{texto}\n".encode("utf-8")
-            )
-            self.txtSend.clear()
-            self.agregar_burbuja("Tú", texto, es_mio=True)
+            if self.coneccion.enviar(f"<grupo_msg>{self.grupo_activo_id}|{texto}"):
+                self.txtSend.clear()
+                self.agregar_burbuja("Tú", texto, es_mio=True)
             return
 
-        elif self.categoria_actual == "canal":
+        if self.categoria_actual == "canal":
             if not getattr(self, "canal_activo_id", None):
                 self.agregar_aviso_sistema(
                     "Selecciona o crea un canal antes de enviar un mensaje."
@@ -851,35 +850,32 @@ class MainWindow(QMainWindow, Ui_Messenger):
                     "Solo el creador puede enviar mensajes en este canal."
                 )
                 return
-            server.sendall(
-                f"<canal_msg>{self.canal_activo_id}|{texto}\n".encode("utf-8")
-            )
-            self.txtSend.clear()
-            self.agregar_burbuja("Tú", texto, es_mio=True)
+            if self.coneccion.enviar(f"<canal_msg>{self.canal_activo_id}|{texto}"):
+                self.txtSend.clear()
+                self.agregar_burbuja("Tú", texto, es_mio=True)
             return
 
-        elif destino == "Global":
-            server.sendall(f"{texto}\n".encode("utf-8"))
-            self.historial_global.append(("burbuja", "Tú", texto, True))
-
+        if destino == "Global":
+            if self.coneccion.enviar(texto):
+                self.historial_global.append(("burbuja", "Tú", texto, True))
+                self.txtSend.clear()
+                self.agregar_burbuja("Tú", texto, es_mio=True)
         else:
-            paquete = f"<msg>{destino}|{texto}\n"
-            server.sendall(paquete.encode("utf-8"))
+            if self.coneccion.enviar(f"<msg>{destino}|{texto}"):
+                self.txtSend.clear()
+                self.agregar_burbuja("Tú", texto, es_mio=True)
 
-        self.txtSend.clear()
-        self.agregar_burbuja("Tú", texto, es_mio=True)
-
-    def _aplicar_usuarios_bd(self, usuarios_info):
+    def _aplicar_usuarios_bd(self, usuarios_info: list):
         if usuarios_info:
             self.imagenes_usuarios = {
-                u["nombre_usuario"].strip().lower(): u["imagen"]
+                u["nombre_usuario"].strip().lower(): u.get("imagen")
                 for u in usuarios_info
                 if u.get("nombre_usuario")
             }
             bd_lower = {u.lower() for u in self.todos_usuarios_bd}
             for u in usuarios_info:
-                nombre_bd = u["nombre_usuario"]
-                if nombre_bd.lower() not in bd_lower:
+                nombre_bd = u.get("nombre_usuario", "").strip()
+                if nombre_bd and nombre_bd.lower() not in bd_lower:
                     self.todos_usuarios_bd.append(nombre_bd)
                     bd_lower.add(nombre_bd.lower())
 
@@ -890,565 +886,255 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 bd_lower.add(u.lower())
 
         self._actualizar_avatar_usuario_actual()
-        self.refrescar_lista_actual()
-        self.actualizar_indicador_chat()
 
-    def procesar_mensaje(self, msg: str):
-        if msg.startswith("<users>"):
-            contenido = msg.removeprefix("<users>")
-            if contenido.endswith("</users>"):
-                contenido = contenido[:-8]
-            self.usuarios_conectados = [
-                u.strip() for u in contenido.split(",") if u.strip()
-            ]
+    def _renderizar_historial(self, mensajes: list):
+        self.txtMsgs.clear()
+        if not mensajes:
+            self.agregar_aviso_sistema("No hay mensajes anteriores.")
+            return
+
+        mi_nombre = self.user_name.strip().lower()
+        for m in mensajes:
+            remitente = str(m.get("remitente", "Desconocido"))
+            texto = str(m.get("contenido") or m.get("mensaje") or "")
+            es_mio = remitente.strip().lower() == mi_nombre
+            etiqueta = "Tú" if es_mio else remitente
+            self.agregar_burbuja(etiqueta, texto, es_mio=es_mio)
+
+    def procesar_mensaje(self, linea: str):
+        if linea == "<!!disconected!!>":
+            self.setWindowTitle("Messenger - Desconectado")
+            self.agregar_aviso_sistema("[Desconectado del servidor]")
             self.refrescar_lista_actual()
             self.actualizar_indicador_chat()
-            self._run_worker(mssql.obtener_usuarios_con_imagen, self._aplicar_usuarios_bd)
-
-        elif msg.startswith("<nuevo_grupo>"):
-            payload = msg.removeprefix("<nuevo_grupo>")
-            partes = payload.split("|", 2)
-            clave_img = (
-                partes[2].strip() if len(partes) >= 3 and partes[2].strip() else None
-            )
-
-            if self.user_id is not None:
-                def _on_grupos(grupos):
-                    self.grupos_disponibles = grupos
-                    if self.categoria_actual == "grupos":
-                        self.refrescar_lista_actual()
-
-                self._run_worker(mssql.obtener_grupos_usuario, _on_grupos, None, self.user_id)
-            elif len(partes) >= 2:
-                id_g_str = partes[0].strip()
-                nom_g = partes[1].strip()
-                if id_g_str.isdigit() and nom_g and hasattr(self, "_agregar_grupo_local"):
-                    self._agregar_grupo_local(
-                        {
-                            "id_grupo": int(id_g_str),
-                            "nombre_grupo": nom_g,
-                            "imagen": clave_img,
-                        }
-                    )
-                    if self.categoria_actual == "grupos":
-                        self.refrescar_lista_actual()
-
-        elif msg == "<!!duplicate!!>":
-            if self.coneccion:
-                self.coneccion.stop()
-            QMessageBox.warning(
-                self,
-                "Sesión duplicada",
-                f"El usuario '{self.user_name}' ya tiene una sesión activa.",
-            )
-            self.ventana_login = VentanaLogin()
-            self.ventana_login.show()
-            self.close()
             return
 
-        elif msg.startswith("<grupo_msg>"):
-            payload = msg.removeprefix("<grupo_msg>")
-            partes = payload.split("|", 2)
-            if len(partes) == 3:
-                id_g_str, remitente, contenido = partes
-                remitente = remitente.strip()
-                if remitente.lower() == self.user_name.strip().lower():
-                    return
-                if (
-                    self.categoria_actual == "grupos"
-                    and str(getattr(self, "grupo_activo_id", "")) == id_g_str.strip()
-                ):
-                    self.agregar_burbuja(remitente, contenido, es_mio=False)
-                else:
-                    self.agregar_aviso_sistema(
-                        f"Nuevo mensaje de grupo de {remitente}"
-                    )
-
-        elif msg.startswith("<historial_grupo_data>"):
-            payload = msg.removeprefix("<historial_grupo_data>").strip()
-            self.mostrar_historial_grupo(payload)
-
-        elif msg.startswith("<msg>"):
-            payload = msg.removeprefix("<msg>")
-            if "|" in payload:
-                remitente, contenido = payload.split("|", 1)
-                remitente = remitente.strip()
-                if remitente.lower() == self.user_name.strip().lower():
-                    return
-                if (
-                    getattr(self, "usuario_activo", None) or ""
-                ).lower() == remitente.lower():
-                    self.agregar_burbuja(remitente, contenido, es_mio=False)
-                else:
-                    self.agregar_aviso_sistema(
-                        f"Nuevo mensaje privado de {remitente}"
-                    )
-
-        elif msg.startswith("<historial_data>"):
-            payload = msg.removeprefix("<historial_data>").strip()
-            self.mostrar_historial(payload)
-
-        elif msg.startswith("<historial>") and msg.endswith("</historial>"):
-            payload = msg.removeprefix("<historial>")[:-12].strip()
-            self.mostrar_historial(payload)
-
-        elif msg.startswith("<nuevo_canal>"):
-            payload = msg.removeprefix("<nuevo_canal>")
-            partes = payload.split("|", 4)
-            if len(partes) >= 2:
-                id_str = partes[0].strip()
-                nombre_c = partes[1].strip()
-                desc_c = partes[2].strip() if len(partes) >= 3 else ""
-                creador_id_str = partes[3].strip() if len(partes) >= 4 else ""
-                clave_img = (
-                    partes[4].strip() if len(partes) >= 5 and partes[4].strip() else None
-                )
-
-                canal_dict = {
-                    "id_canal": int(id_str) if id_str.isdigit() else id_str,
-                    "nombre_canal": nombre_c,
-                    "descripcion": desc_c,
-                    "id_creador": int(creador_id_str)
-                    if creador_id_str.isdigit()
-                    else None,
-                    "creador": "",
-                    "imagen": clave_img,
-                }
-                if (
-                    self._agregar_canal_local(canal_dict)
-                    and self.categoria_actual == "canal"
-                ):
-                    self.refrescar_lista_actual()
-
-        elif msg.startswith("<canal_msg>"):
-            payload = msg.removeprefix("<canal_msg>")
-            partes = payload.split("|", 2)
-            if len(partes) == 3:
-                id_c_str, remitente, contenido = partes
-                remitente = remitente.strip()
-                if remitente.lower() == self.user_name.strip().lower():
-                    return
-                if (
-                    self.categoria_actual == "canal"
-                    and str(getattr(self, "canal_activo_id", "")) == id_c_str.strip()
-                ):
-                    self.agregar_burbuja(remitente, contenido, es_mio=False)
-                else:
-                    self.agregar_aviso_sistema(
-                        f"Nuevo mensaje en canal de {remitente}"
-                    )
-
-        elif msg.startswith("<historial_canal_data>"):
-            payload = msg.removeprefix("<historial_canal_data>").strip()
-            self.mostrar_historial_canal(payload)
-
-        else:
-            match_brackets = re.match(r"^<([^>]+)>\s*(.+)$", msg, re.DOTALL)
-            match_colon = re.match(r"^([^:]{1,30}):\s*(.+)$", msg, re.DOTALL)
-
-            if match_brackets and not msg.startswith("<!!"):
-                remitente, contenido = match_brackets.group(1), match_brackets.group(2)
-                self.historial_global.append(("burbuja", remitente, contenido, False))
-                if getattr(self, "usuario_activo", None) == "Global":
-                    self.agregar_burbuja(remitente, contenido, es_mio=False)
-            elif match_colon and not msg.startswith("***"):
-                remitente, contenido = match_colon.group(1), match_colon.group(2)
-                self.historial_global.append(("burbuja", remitente, contenido, False))
-                if getattr(self, "usuario_activo", None) == "Global":
-                    self.agregar_burbuja(remitente, contenido, es_mio=False)
-            else:
-                self.historial_global.append(("sistema", msg))
-                if getattr(self, "usuario_activo", None) == "Global":
-                    self.agregar_aviso_sistema(msg)
-
-    def mostrar_historial_canal(self, raw_data: str):
-        try:
-            data = json.loads(raw_data.strip())
-        except json.JSONDecodeError:
-            self.agregar_aviso_sistema("Error al obtener historial del canal")
+        if linea == "<!!error!!>":
+            self.setWindowTitle("Messenger - Error de conexión")
+            self.agregar_aviso_sistema("[Error de comunicación con el servidor]")
             return
 
-        id_canal = data.get("id_canal")
-        mensajes = data.get("mensajes", [])
-
-        if getattr(self, "canal_activo_id", None) != id_canal:
+        # Carga inicial desde el servidor
+        if linea.startswith("<init_data_ok>"):
+            try:
+                datos = json.loads(linea.removeprefix("<init_data_ok>"))
+                self._aplicar_usuarios_bd(datos.get("usuarios", []))
+                self.canales_disponibles = datos.get("canales", [])
+                self.grupos_disponibles = datos.get("grupos", [])
+                self.refrescar_lista_actual()
+                self.actualizar_indicador_chat()
+            except json.JSONDecodeError as e:
+                print(f"Error decodificando init_data_ok: {e}")
             return
 
-        self.txtMsgs.clear()
-
-        if not mensajes:
-            self.agregar_aviso_sistema("No hay mensajes previos en este canal")
-            return
-
-        for msg in mensajes:
-            remitente = msg.get("remitente", "Desconocido")
-            contenido = msg.get("contenido", "")
-            fecha = msg.get("fecha_envio", "")
-            es_mio = remitente.strip().lower() == self.user_name.strip().lower()
-            self.agregar_burbuja(remitente, contenido, es_mio=es_mio, fecha=fecha)
-
-    def mostrar_historial_grupo(self, raw_data: str):
-        try:
-            data = json.loads(raw_data.strip())
-        except json.JSONDecodeError:
-            self.agregar_aviso_sistema("Error al obtener historial del grupo")
-            return
-
-        id_grupo = data.get("id_grupo")
-        mensajes = data.get("mensajes", [])
-
-        if getattr(self, "grupo_activo_id", None) != id_grupo:
-            return
-
-        self.txtMsgs.clear()
-
-        if not mensajes:
-            self.agregar_aviso_sistema("No hay mensajes previos en este grupo")
-            return
-
-        for msg in mensajes:
-            remitente = msg.get("remitente", "Desconocido")
-            contenido = msg.get("contenido", "")
-            fecha = msg.get("fecha_envio", "")
-            es_mio = remitente.strip().lower() == self.user_name.strip().lower()
-            self.agregar_burbuja(remitente, contenido, es_mio=es_mio, fecha=fecha)
-
-    def mostrar_historial(self, raw_data: str):
-        try:
-            data = json.loads(raw_data.strip())
-        except json.JSONDecodeError:
-            self.agregar_aviso_sistema("Error al obtener historial")
-            return
-
-        con_usuario = data.get("con_usuario")
-        mensajes = data.get("mensajes", [])
-
-        if getattr(self, "usuario_activo", None) and con_usuario != self.usuario_activo:
-            return
-
-        self.txtMsgs.clear()
-
-        if not mensajes:
-            self.agregar_aviso_sistema(f"No hay mensajes previos con {con_usuario}")
-            return
-
-        for msg in mensajes:
-            remitente = msg.get("remitente", "Desconocido")
-            contenido = msg.get("contenido", "")
-            fecha = msg.get("fecha_envio", "")
-            es_mio = remitente.strip().lower() == self.user_name.strip().lower()
-            self.agregar_burbuja(remitente, contenido, es_mio=es_mio, fecha=fecha)
-
-    def mostrar_global(self):
-        self.txtMsgs.clear()
-        if not self.historial_global:
-            self.agregar_aviso_sistema("Estás en el chat Global")
-            return
-
-        for item in self.historial_global:
-            if item[0] == "burbuja":
-                _, remitente, contenido, es_mio = item
-                self.agregar_burbuja(remitente, contenido, es_mio=es_mio)
-            elif item[0] == "sistema":
-                _, texto = item
-                self.agregar_aviso_sistema(texto)
-
-    def agregar_burbuja(self, remitente: str, texto: str, es_mio: bool, fecha: str = ""):
-        if not hasattr(self.txtMsgs, "insertHtml"):
-            prefijo = "Tú" if es_mio else remitente
-            self.mensage_entrante(f"<{prefijo}> {texto}\n")
-            return
-
-        texto_seguro = html.escape(texto).replace("\n", "<br>")
-        remitente_seguro = html.escape("Tú" if es_mio else remitente)
-        fecha_html = (
-            f" <span style='color:#71717a; font-size:10px;'>({html.escape(fecha)})</span>"
-            if fecha
-            else ""
-        )
-
-        if es_mio:
-            bloque_html = f"""
-            <table width="100%" border="0" cellspacing="0" cellpadding="2">
-                <tr>
-                    <td width="25%"></td>
-                    <td width="75%" align="right">
-                        <div style="color: #93c5fd; font-size: 11px; font-weight: bold; margin-bottom: 2px;">
-                            {remitente_seguro}{fecha_html}
-                        </div>
-                        <table border="0" cellspacing="0" cellpadding="8" style="background-color: #2563eb; border-radius: 10px;">
-                            <tr>
-                                <td style="color: #ffffff; font-size: 13px; text-align: left;">
-                                    {texto_seguro}
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-            """
-        else:
-            bloque_html = f"""
-            <table width="100%" border="0" cellspacing="0" cellpadding="2">
-                <tr>
-                    <td width="75%" align="left">
-                        <div style="color: #a1a1aa; font-size: 11px; font-weight: bold; margin-bottom: 2px;">
-                            {remitente_seguro}{fecha_html}
-                        </div>
-                        <table border="0" cellspacing="0" cellpadding="8" style="background-color: #27272a; border-radius: 10px;">
-                            <tr>
-                                <td style="color: #f4f4f5; font-size: 13px; text-align: left;">
-                                    {texto_seguro}
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                    <td width="25%"></td>
-                </tr>
-            </table>
-            """
-
-        cursor = self.txtMsgs.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(bloque_html)
-        self.txtMsgs.setTextCursor(cursor)
-        self.txtMsgs.verticalScrollBar().setValue(
-            self.txtMsgs.verticalScrollBar().maximum()
-        )
-
-    def agregar_aviso_sistema(self, texto: str):
-        if not hasattr(self.txtMsgs, "insertHtml"):
-            self.mensage_entrante(texto + "\n")
-            return
-
-        texto_seguro = html.escape(texto)
-        bloque_html = f"""
-        <table width="100%" border="0" cellspacing="0" cellpadding="4">
-            <tr>
-                <td align="center" style="color: #71717a; font-size: 11px; font-style: italic;">
-                    {texto_seguro}
-                </td>
-            </tr>
-        </table>
-        """
-        cursor = self.txtMsgs.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(bloque_html)
-        self.txtMsgs.setTextCursor(cursor)
-        self.txtMsgs.verticalScrollBar().setValue(
-            self.txtMsgs.verticalScrollBar().maximum()
-        )
-
-    def mensage_entrante(self, mensaje):
-        if hasattr(self.txtMsgs, "setPlainText"):
-            self.txtMsgs.setPlainText(self.txtMsgs.toPlainText() + mensaje)
-        else:
-            self.txtMsgs.append(mensaje)
-        self.txtMsgs.verticalScrollBar().setValue(
-            self.txtMsgs.verticalScrollBar().maximum()
-        )
-
-    def _detener_hilos(self):
-        if self.coneccion:
-            self.coneccion.stop()
-            self.coneccion = None
-        for worker in list(self._workers):
-            worker.wait(2000)
-
-    def closeEvent(self, event):
-        self._detener_hilos()
-        super().closeEvent(event)
-
-    def salir(self):
-        self._detener_hilos()
-        sys.exit()
-
-    def showDialog(self):
-        dialog = MiDialogo(self)
-        resp = dialog.exec()
-        if resp == 1:
-            host = dialog.txtServer.text().strip()
-            user = dialog.txtUser.text().strip() or self.user_name
-            port = dialog.txtPort.text().strip()
-            if host and port and port.isnumeric():
-                self.conectar_servidor(host, int(port), self.user_id, user)
-
-    def abrir_formulario_canal(self):
-        self.txtNombreCanal.clear()
-        self.txtDescripcionCanal.clear()
-        self.lblIndicadorChat.setText("Nuevo canal")
-        self.stackedDerecha.setCurrentWidget(self.pageCrearCanal)
-        self.txtNombreCanal.setFocus()
-
-    def cerrar_formulario_canal(self):
-        self.txtNombreCanal.clear()
-        self.txtDescripcionCanal.clear()
-        self.stackedDerecha.setCurrentWidget(self.pageChat)
-        self.actualizar_indicador_chat()
-
-    def _agregar_canal_local(self, canal: dict) -> bool:
-        nombre = str(canal.get("nombre_canal", "")).strip()
-        id_canal = canal.get("id_canal")
-        if not nombre:
-            return False
-
-        for c in self.canales_disponibles:
-            if isinstance(c, dict):
-                if (id_canal is not None and c.get("id_canal") == id_canal) or (
-                    c.get("nombre_canal", "").strip().lower() == nombre.lower()
-                ):
-                    return False
-            elif str(c).strip().lower() == nombre.lower():
-                return False
-
-        self.canales_disponibles.append(
-            {
-                "id_canal": id_canal,
-                "nombre_canal": nombre,
-                "descripcion": str(canal.get("descripcion", "")).strip(),
-                "id_creador": canal.get("id_creador"),
-                "creador": str(canal.get("creador", "")).strip(),
-                "imagen": canal.get("imagen"),
-            }
-        )
-        self.canales_disponibles.sort(
-            key=lambda x: (
-                x["nombre_canal"].lower() if isinstance(x, dict) else str(x).lower()
-            )
-        )
-        return True
-
-    def _crear_canal_y_consultar(self, nombre_canal, descripcion_canal, uid):
-        id_canal = mssql.crear_canal_bd(
-            nombre_canal=nombre_canal,
-            descripcion=descripcion_canal,
-            id_creador=uid,
-        )
-        if not id_canal:
-            return None, None
-        canales_bd = mssql.obtener_canales()
-        canal_bd = next(
-            (c for c in canales_bd if int(c["id_canal"]) == int(id_canal)), None
-        )
-        clave_img = canal_bd.get("imagen") if canal_bd else None
-        return id_canal, clave_img
-
-    def confirmar_crear_canal(self):
-        nombre_canal = self.txtNombreCanal.text().strip()
-        descripcion_canal = self.txtDescripcionCanal.text().strip()
-
-        if not nombre_canal:
-            QMessageBox.warning(
-                self, "Falta nombre", "Escribe un nombre para el canal."
-            )
-            return
-
-        if self.user_id is None:
-            QMessageBox.warning(
-                self, "Sesión no válida", "No se detectó tu usuario para crear el canal."
-            )
-            return
-
-        self.btnGuardarCanal.setEnabled(False)
-
-        def _on_ok(resultado):
-            self.btnGuardarCanal.setEnabled(True)
-            id_canal, clave_img = resultado
-            if not id_canal:
-                QMessageBox.critical(
-                    self,
-                    "Error al crear canal",
-                    "No se pudo guardar el canal (puede que ya exista o haya error en BD).",
-                )
+        # Respuesta al crear grupo
+        if linea.startswith("<grupo_creado_ok>"):
+            self.btnGuardarGrupo.setEnabled(True)
+            try:
+                grupo = json.loads(linea.removeprefix("<grupo_creado_ok>"))
+            except json.JSONDecodeError:
                 return
 
-            nuevo_canal = {
-                "id_canal": id_canal,
-                "nombre_canal": nombre_canal,
-                "descripcion": descripcion_canal,
-                "id_creador": self.user_id,
-                "creador": self.user_name,
-                "imagen": clave_img,
-            }
+            id_grupo = grupo["id_grupo"]
+            nombre_grupo = grupo["nombre_grupo"]
+            if not any(
+                int(g["id_grupo"]) == int(id_grupo) for g in self.grupos_disponibles
+            ):
+                self.grupos_disponibles.append(grupo)
 
-            self._agregar_canal_local(nuevo_canal)
-            if self.categoria_actual == "canal":
-                self.refrescar_lista_actual()
+            self.grupo_activo_id = id_grupo
+            self.canal_activo_id = None
+            self.canal_creador_id = None
+            self.usuario_activo = nombre_grupo
 
-            if connected and server:
-                try:
-                    paquete = (
-                        f"<nuevo_canal>{id_canal}|{nombre_canal}|"
-                        f"{descripcion_canal}|{self.user_id}|{clave_img}\n"
-                    )
-                    server.sendall(paquete.encode("utf-8"))
-                except OSError as e:
-                    print(f"Error al notificar nuevo canal por socket: {e}")
+            self._actualizar_permiso_envio_canal(True)
+            self._actualizar_avatar_chat(grupo.get("imagen"))
+            self.cerrar_formulario_grupo()
+            self.refrescar_lista_actual()
+            self.txtSend.setPlaceholderText(f"Mensaje en {nombre_grupo}...")
+            self.txtMsgs.clear()
+            self.agregar_aviso_sistema(f"Grupo '{nombre_grupo}' creado.")
+            return
+
+        if linea.startswith("<grupo_creado_err>"):
+            self.btnGuardarGrupo.setEnabled(True)
+            motivo = (
+                linea.removeprefix("<grupo_creado_err>").strip()
+                or "No se pudo crear el grupo."
+            )
+            QMessageBox.warning(self, "Error", motivo)
+            return
+
+        # Notificación cuando otro usuario te agrega a un grupo
+        if linea.startswith("<nuevo_grupo>"):
+            cuerpo = linea.removeprefix("<nuevo_grupo>").strip()
+            try:
+                grupo = json.loads(cuerpo)
+                if not any(
+                    int(g["id_grupo"]) == int(grupo["id_grupo"])
+                    for g in self.grupos_disponibles
+                ):
+                    self.grupos_disponibles.append(grupo)
+                    self.refrescar_lista_actual()
+            except json.JSONDecodeError:
+                pass
+            return
+
+        # Respuesta al crear canal
+        if linea.startswith("<canal_creado_ok>"):
+            if hasattr(self, "btnGuardarCanal"):
+                self.btnGuardarCanal.setEnabled(True)
+            try:
+                canal = json.loads(linea.removeprefix("<canal_creado_ok>"))
+            except json.JSONDecodeError:
+                return
+
+            id_canal = canal["id_canal"]
+            nombre_canal = canal["nombre_canal"]
+            if not any(
+                int(c["id_canal"]) == int(id_canal) for c in self.canales_disponibles
+            ):
+                self.canales_disponibles.append(canal)
 
             self.grupo_activo_id = None
             self.canal_activo_id = id_canal
-            self.canal_creador_id = self.user_id
+            self.canal_creador_id = canal.get("id_creador", self.user_id)
             self.usuario_activo = nombre_canal
 
             self._actualizar_permiso_envio_canal(True)
-            self._actualizar_avatar_chat(clave_img)
-            self.actualizar_indicador_chat()
-
+            self._actualizar_avatar_chat(canal.get("imagen"))
             self.cerrar_formulario_canal()
+            self.refrescar_lista_actual()
             self.txtSend.setPlaceholderText(f"Mensaje en #{nombre_canal}...")
             self.txtMsgs.clear()
-
-            aviso = f"Canal '{nombre_canal}' creado."
-            if descripcion_canal:
-                aviso += f" Descripción: {descripcion_canal}"
-            self.agregar_aviso_sistema(aviso)
-
-        def _on_err(err):
-            self.btnGuardarCanal.setEnabled(True)
-            QMessageBox.critical(
-                self, "Error al crear canal", f"Ocurrió un error en BD:\n{err}"
-            )
-
-        self._run_worker(
-            self._crear_canal_y_consultar,
-            _on_ok,
-            _on_err,
-            nombre_canal,
-            descripcion_canal,
-            self.user_id,
-        )
-
-    def _actualizar_permiso_envio_canal(self, puede_escribir: bool = True):
-        if hasattr(self, "lblSoloCreadorCanal"):
-            self.lblSoloCreadorCanal.setVisible(not puede_escribir)
-        if hasattr(self, "txtSend"):
-            self.txtSend.setVisible(puede_escribir)
-            self.txtSend.setEnabled(puede_escribir)
-            if not puede_escribir:
-                self.txtSend.clear()
-        if hasattr(self, "btnSend"):
-            self.btnSend.setVisible(puede_escribir)
-            self.btnSend.setEnabled(puede_escribir)
-
-    def cerrar_sesion(self):
-        respuesta = QMessageBox.question(
-            self,
-            "Cerrar sesión",
-            "¿Seguro que quieres cerrar tu sesión actual?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if respuesta != QMessageBox.StandardButton.Yes:
+            self.agregar_aviso_sistema(f"Canal '#{nombre_canal}' creado.")
             return
 
-        self._detener_hilos()
-        self.ventana_login = VentanaLogin()
-        self.ventana_login.show()
+        if linea.startswith("<canal_creado_err>"):
+            if hasattr(self, "btnGuardarCanal"):
+                self.btnGuardarCanal.setEnabled(True)
+            motivo = (
+                linea.removeprefix("<canal_creado_err>").strip()
+                or "No se pudo crear el canal."
+            )
+            QMessageBox.warning(self, "Error", motivo)
+            return
+
+        # Notificación de nuevo canal público
+        if linea.startswith("<nuevo_canal>"):
+            cuerpo = linea.removeprefix("<nuevo_canal>").strip()
+            try:
+                canal = json.loads(cuerpo)
+                if not any(
+                    int(c["id_canal"]) == int(canal["id_canal"])
+                    for c in self.canales_disponibles
+                ):
+                    self.canales_disponibles.append(canal)
+                    self.refrescar_lista_actual()
+            except json.JSONDecodeError:
+                pass
+            return
+
+        # Lista de usuarios conectados
+        if linea.startswith("<users>"):
+            cuerpo = linea.removeprefix("<users>").strip()
+            try:
+                lista = json.loads(cuerpo)
+                if isinstance(lista, list):
+                    self.usuarios_conectados = [str(u).strip() for u in lista if u]
+            except json.JSONDecodeError:
+                self.usuarios_conectados = [
+                    u.strip() for u in cuerpo.split(",") if u.strip()
+                ]
+            self._aplicar_usuarios_bd([])
+            self.refrescar_lista_actual()
+            self.actualizar_indicador_chat()
+            return
+
+        # Historiales (privado, grupo, canal)
+        if linea.startswith(("<historial>", "<historial_grupo>", "<historial_canal>")):
+            for prefijo in ("<historial>", "<historial_grupo>", "<historial_canal>"):
+                if linea.startswith(prefijo):
+                    cuerpo = linea.removeprefix(prefijo).strip()
+                    try:
+                        mensajes = json.loads(cuerpo)
+                        if isinstance(mensajes, list):
+                            self._renderizar_historial(mensajes)
+                    except json.JSONDecodeError as e:
+                        print(f"Error al leer historial: {e}")
+                    return
+
+        # Mensaje privado entrante: <msg>remitente|texto
+        if linea.startswith("<msg>"):
+            cuerpo = linea.removeprefix("<msg>")
+            if "|" in cuerpo:
+                remitente, texto = cuerpo.split("|", 1)
+                if (
+                    self.categoria_actual == "chats"
+                    and self.usuario_activo.strip().lower() == remitente.strip().lower()
+                ):
+                    self.agregar_burbuja(remitente, texto, es_mio=False)
+                else:
+                    self.agregar_aviso_sistema(f"Nuevo mensaje privado de {remitente}")
+            return
+
+        # Mensaje de grupo entrante: <grupo_msg>id_grupo|remitente|texto
+        if linea.startswith("<grupo_msg>"):
+            partes = linea.removeprefix("<grupo_msg>").split("|", 2)
+            if len(partes) == 3:
+                id_grupo, remitente, texto = partes
+                if (
+                    self.categoria_actual == "grupos"
+                    and str(self.grupo_activo_id) == str(id_grupo)
+                ):
+                    self.agregar_burbuja(remitente, texto, es_mio=False)
+            return
+
+        # Mensaje de canal entrante: <canal_msg>id_canal|remitente|texto
+        if linea.startswith("<canal_msg>"):
+            partes = linea.removeprefix("<canal_msg>").split("|", 2)
+            if len(partes) == 3:
+                id_canal, remitente, texto = partes
+                if (
+                    self.categoria_actual == "canal"
+                    and str(self.canal_activo_id) == str(id_canal)
+                ):
+                    self.agregar_burbuja(remitente, texto, es_mio=False)
+            return
+
+        # Mensaje global entrante
+        if ":" in linea:
+            remitente, texto = linea.split(":", 1)
+            remitente = remitente.strip()
+            texto = texto.strip()
+            self.historial_global.append(("burbuja", remitente, texto, False))
+            if self.categoria_actual == "chats" and self.usuario_activo == "Global":
+                self.agregar_burbuja(remitente, texto, es_mio=False)
+        else:
+            self.historial_global.append(("aviso", linea))
+            if self.categoria_actual == "chats" and self.usuario_activo == "Global":
+                self.agregar_aviso_sistema(linea)
+
+    # ==================== CIERRE DE SESIÓN Y VENTANA ====================
+    def cerrar_sesion(self):
+        if self.coneccion:
+            self.coneccion.stop()
+            self.coneccion = None
+        self.login = VentanaLogin()
+        self.login.show()
         self.close()
 
+    def salir(self):
+        self.close()
 
-class MiDialogo(QDialog, Ui_Dialog):
+    def closeEvent(self, event):
+        if self.coneccion:
+            self.coneccion.stop()
+        super().closeEvent(event)
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setupUi(self)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    ventana = VentanaLogin()
+    ventana.show()
+    sys.exit(app.exec())
