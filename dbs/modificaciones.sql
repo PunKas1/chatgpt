@@ -58,3 +58,13 @@ CREATE TABLE Canales (
     CONSTRAINT FK_Canales_Usuarios
         FOREIGN KEY (id_creador) REFERENCES Usuarios(id_usuario)
 );
+USE GANADORES;
+GO
+CREATE TABLE dbo.CanalSuscriptores (
+    id_canal INT NOT NULL FOREIGN KEY REFERENCES dbo.Canales(id_canal),
+    id_usuario INT NOT NULL FOREIGN KEY REFERENCES dbo.Usuarios(id_usuario),
+    PRIMARY KEY (id_canal, id_usuario)
+);
+
+INSERT INTO dbo.CanalSuscriptores (id_canal, id_usuario)
+SELECT id_canal, id_creador FROM dbo.Canales;

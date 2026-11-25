@@ -1,3 +1,4 @@
+from datetime import datetime
 import html
 import json
 import socket
@@ -14,7 +15,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from uis.conectar_ui import *
 from uis.iniciarSesion_ui import *
 from uis.principal_ui import *
 
@@ -117,6 +117,7 @@ class VentanaLogin(QWidget, Ui_Form):
 
         self.bton_login.clicked.connect(lambda: self._conectar_y_enviar("login"))
         self.bton_crear.clicked.connect(lambda: self._conectar_y_enviar("registro"))
+        self.lineEdit_2.returnPressed.connect(lambda: self._conectar_y_enviar("login"))
 
     def _set_botones(self, estado: bool):
         self.bton_login.setEnabled(estado)
@@ -247,13 +248,11 @@ class MainWindow(QMainWindow, Ui_Messenger):
         user_id=None,
         user_name: str = "",
         coneccion: ThreadSocket | None = None,
-        *args,
-        **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.setupUi(self)
         self.user_id = user_id
-        self.user_name = user_name
+        self.user_name = str(user_name).strip()
         self.coneccion = coneccion
 
         self.usuario_activo = "Global"
@@ -310,7 +309,9 @@ class MainWindow(QMainWindow, Ui_Messenger):
 
         if hasattr(self, "lblUserConectado"):
             etiqueta_user = (
-                f"Usuario: {user_name}" if user_name else "Usuario: Desconectado"
+                f"Usuario: {self.user_name}"
+                if self.user_name
+                else "Usuario: Desconectado"
             )
             self.lblUserConectado.setText(etiqueta_user)
         if hasattr(self, "lblIndicadorChat"):
@@ -322,7 +323,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.coneccion.signal_error.connect(
                 lambda err: self.agregar_aviso_sistema(f"[Error de socket: {err}]")
             )
-            self.setWindowTitle(f"Messenger - Conectado ({user_name})")
+            self.setWindowTitle(f"Messenger - Conectado ({self.user_name})")
             self.coneccion.enviar("<init_data>")
         else:
             self.setWindowTitle("Messenger - Desconectado")
@@ -451,12 +452,12 @@ class MainWindow(QMainWindow, Ui_Messenger):
         self.refrescar_lista_actual()
 
     def _actualizar_permiso_envio_canal(self, permitido: bool):
+        self.txtSend.setVisible(permitido)
+        self.btnSend.setVisible(permitido)
         self.txtSend.setEnabled(permitido)
         self.btnSend.setEnabled(permitido)
-        if not permitido:
-            self.txtSend.setPlaceholderText(
-                "Solo el creador puede enviar mensajes en este canal."
-            )
+        if hasattr(self, "lblSoloCreadorCanal"):
+            self.lblSoloCreadorCanal.setVisible(not permitido)
 
     # ==================== FORMULARIO CREAR GRUPO ====================
     def abrir_formulario_grupo(self):
@@ -688,48 +689,102 @@ class MainWindow(QMainWindow, Ui_Messenger):
             else:
                 self.lblIndicadorChat.setText("Canales")
 
-    # ==================== BURBUJAS Y MENSAJES EN PANTALLA ====================
+    # ==================== BURBUJAS Y FORMATO DE MENSAJES ====================
+    def _bajar_scroll(self):
+        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+        barra = self.txtMsgs.verticalScrollBar()
+        if barra:
+            barra.setValue(barra.maximum())
+
+    def _parsear_fecha_hora(self, fecha_iso: str | None) -> tuple[str | None, str]:
+        if not fecha_iso:
+            return None, datetime.now().strftime("%H:%M")
+        try:
+            dt = datetime.fromisoformat(str(fecha_iso))
+            return dt.strftime("%d/%m/%Y"), dt.strftime("%H:%M")
+        except ValueError:
+            return None, ""
+
+    def agregar_separador_fecha(self, etiqueta_fecha: str):
+        seguro = html.escape(etiqueta_fecha)
+        bloque = (
+            '<table width="100%" border="0" cellspacing="0" cellpadding="6">'
+            '<tr><td align="center">'
+            '<table bgcolor="#27272a" cellpadding="4" cellspacing="0">'
+            f'<tr><td style="color:#a1a1aa; font-size:11px; font-weight:bold;">{seguro}</td></tr>'
+            "</table>"
+            "</td></tr></table>"
+        )
+        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+        self.txtMsgs.insertHtml(bloque)
+        self._bajar_scroll()
+
     def agregar_aviso_sistema(self, texto: str):
         seguro = html.escape(texto)
         bloque = (
-            '<div style="text-align:center; color:#888888; font-size:12px; '
-            f'margin:6px 0;"><i>{seguro}</i></div>'
+            '<table width="100%" border="0" cellspacing="0" cellpadding="4">'
+            '<tr><td align="center" style="color:#888888; font-size:12px;">'
+            f"<i>{seguro}</i>"
+            "</td></tr></table>"
         )
         self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
-        self.txtMsgs.insertHtml(bloque + "<br>")
-        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+        self.txtMsgs.insertHtml(bloque)
+        self._bajar_scroll()
 
-    def agregar_burbuja(self, remitente: str, texto: str, es_mio: bool = False):
+    def agregar_burbuja(
+        self,
+        remitente: str,
+        texto: str,
+        es_mio: bool = False,
+        hora: str | None = None,
+    ):
         rem_seguro = html.escape(remitente)
         txt_seguro = html.escape(texto).replace("\n", "<br>")
+        hora_txt = html.escape(hora if hora is not None else datetime.now().strftime("%H:%M"))
+
         if es_mio:
+            burbuja_interna = (
+                '<table bgcolor="#1d4ed8" cellpadding="9" cellspacing="0">'
+                "<tr><td align=\"left\">"
+                f'<div style="font-size:11px; font-weight:bold; color:#bfdbfe; margin-bottom:3px;">{rem_seguro}</div>'
+                f'<div style="font-size:13px; color:#ffffff;">{txt_seguro}</div>'
+                f'<div style="font-size:10px; color:#93c5fd; text-align:right; margin-top:4px;">{hora_txt}</div>'
+                "</td></tr></table>"
+            )
             bloque = (
-                '<div style="text-align:right; margin:6px 10px;">'
-                '<span style="display:inline-block; background-color:#2b5278; '
-                "color:#ffffff; padding:8px 12px; border-radius:10px; "
-                f'max-width:70%; text-align:left;">'
-                f'<b style="font-size:11px; color:#a8d1ff;">{rem_seguro}</b><br>'
-                f"{txt_seguro}</span></div>"
+                '<table width="100%" border="0" cellspacing="0" cellpadding="3">'
+                "<tr>"
+                '<td width="28%"></td>'
+                f'<td width="72%" align="right">{burbuja_interna}</td>'
+                "</tr></table>"
             )
         else:
-            bloque = (
-                '<div style="text-align:left; margin:6px 10px;">'
-                '<span style="display:inline-block; background-color:#26292e; '
-                "color:#f1f1f1; padding:8px 12px; border-radius:10px; "
-                f'max-width:70%; text-align:left;">'
-                f'<b style="font-size:11px; color:#6ab2f2;">{rem_seguro}</b><br>'
-                f"{txt_seguro}</span></div>"
+            burbuja_interna = (
+                '<table bgcolor="#27272a" cellpadding="9" cellspacing="0">'
+                "<tr><td align=\"left\">"
+                f'<div style="font-size:11px; font-weight:bold; color:#60a5fa; margin-bottom:3px;">{rem_seguro}</div>'
+                f'<div style="font-size:13px; color:#f4f4f5;">{txt_seguro}</div>'
+                f'<div style="font-size:10px; color:#a1a1aa; text-align:right; margin-top:4px;">{hora_txt}</div>'
+                "</td></tr></table>"
             )
+            bloque = (
+                '<table width="100%" border="0" cellspacing="0" cellpadding="3">'
+                "<tr>"
+                f'<td width="72%" align="left">{burbuja_interna}</td>'
+                '<td width="28%"></td>'
+                "</tr></table>"
+            )
+
         self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
-        self.txtMsgs.insertHtml(bloque + "<br>")
-        self.txtMsgs.moveCursor(QTextCursor.MoveOperation.End)
+        self.txtMsgs.insertHtml(bloque)
+        self._bajar_scroll()
 
     def mostrar_global(self):
         self.txtMsgs.clear()
         for entrada in self.historial_global:
             if entrada[0] == "burbuja":
-                _, remitente, texto, es_mio = entrada
-                self.agregar_burbuja(remitente, texto, es_mio=es_mio)
+                _, remitente, texto, es_mio, hora = entrada
+                self.agregar_burbuja(remitente, texto, es_mio=es_mio, hora=hora)
             elif entrada[0] == "aviso":
                 self.agregar_aviso_sistema(entrada[1])
 
@@ -755,6 +810,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.txtSend.setPlaceholderText(f"Mensaje en {self.usuario_activo}...")
             self.txtSend.setFocus()
             self.txtMsgs.clear()
+            self.agregar_aviso_sistema("Cargando historial del grupo...")
 
             if self.esta_conectado:
                 if not self.coneccion.enviar(
@@ -783,6 +839,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 self.txtSend.setPlaceholderText(f"Mensaje en #{self.usuario_activo}...")
                 self.txtSend.setFocus()
             self.txtMsgs.clear()
+            self.agregar_aviso_sistema("Cargando mensajes del canal...")
 
             if self.esta_conectado:
                 if not self.coneccion.enviar(
@@ -813,6 +870,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
             self.mostrar_global()
         elif self.categoria_actual == "chats" and self.esta_conectado:
             self.txtMsgs.clear()
+            self.agregar_aviso_sistema("Cargando historial...")
             if not self.coneccion.enviar(f"<historial>{usuario}"):
                 self.agregar_aviso_sistema("[Error al pedir historial]")
         else:
@@ -825,6 +883,8 @@ class MainWindow(QMainWindow, Ui_Messenger):
         if not texto or not self.esta_conectado:
             return
 
+        hora_actual = datetime.now().strftime("%H:%M")
+
         if self.categoria_actual == "grupos":
             if not getattr(self, "grupo_activo_id", None):
                 self.agregar_aviso_sistema(
@@ -833,7 +893,7 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 return
             if self.coneccion.enviar(f"<grupo_msg>{self.grupo_activo_id}|{texto}"):
                 self.txtSend.clear()
-                self.agregar_burbuja("Tú", texto, es_mio=True)
+                self.agregar_burbuja("Tú", texto, es_mio=True, hora=hora_actual)
             return
 
         if self.categoria_actual == "canal":
@@ -852,18 +912,18 @@ class MainWindow(QMainWindow, Ui_Messenger):
                 return
             if self.coneccion.enviar(f"<canal_msg>{self.canal_activo_id}|{texto}"):
                 self.txtSend.clear()
-                self.agregar_burbuja("Tú", texto, es_mio=True)
+                self.agregar_burbuja("Tú", texto, es_mio=True, hora=hora_actual)
             return
 
         if destino == "Global":
             if self.coneccion.enviar(texto):
-                self.historial_global.append(("burbuja", "Tú", texto, True))
+                self.historial_global.append(("burbuja", "Tú", texto, True, hora_actual))
                 self.txtSend.clear()
-                self.agregar_burbuja("Tú", texto, es_mio=True)
+                self.agregar_burbuja("Tú", texto, es_mio=True, hora=hora_actual)
         else:
             if self.coneccion.enviar(f"<msg>{destino}|{texto}"):
                 self.txtSend.clear()
-                self.agregar_burbuja("Tú", texto, es_mio=True)
+                self.agregar_burbuja("Tú", texto, es_mio=True, hora=hora_actual)
 
     def _aplicar_usuarios_bd(self, usuarios_info: list):
         if usuarios_info:
@@ -894,12 +954,20 @@ class MainWindow(QMainWindow, Ui_Messenger):
             return
 
         mi_nombre = self.user_name.strip().lower()
+        fecha_anterior = None
+
         for m in mensajes:
-            remitente = str(m.get("remitente", "Desconocido"))
+            remitente = str(m.get("remitente", "Desconocido")).strip()
             texto = str(m.get("contenido") or m.get("mensaje") or "")
-            es_mio = remitente.strip().lower() == mi_nombre
+            fecha_dia, hora_msg = self._parsear_fecha_hora(m.get("fecha_envio"))
+
+            if fecha_dia and fecha_dia != fecha_anterior:
+                self.agregar_separador_fecha(fecha_dia)
+                fecha_anterior = fecha_dia
+
+            es_mio = remitente.lower() == mi_nombre
             etiqueta = "Tú" if es_mio else remitente
-            self.agregar_burbuja(etiqueta, texto, es_mio=es_mio)
+            self.agregar_burbuja(etiqueta, texto, es_mio=es_mio, hora=hora_msg)
 
     def procesar_mensaje(self, linea: str):
         if linea == "<!!disconected!!>":
@@ -1052,28 +1120,46 @@ class MainWindow(QMainWindow, Ui_Messenger):
             return
 
         # Historiales (privado, grupo, canal)
-        if linea.startswith(("<historial>", "<historial_grupo>", "<historial_canal>")):
-            for prefijo in ("<historial>", "<historial_grupo>", "<historial_canal>"):
+        prefijos_historial = (
+            "<historial>",
+            "<historial_grupo>",
+            "<historial_canal>",
+            "<historial_data>",
+            "<historial_grupo_data>",
+            "<historial_canal_data>",
+        )
+        if linea.startswith(prefijos_historial):
+            for prefijo in prefijos_historial:
                 if linea.startswith(prefijo):
                     cuerpo = linea.removeprefix(prefijo).strip()
                     try:
-                        mensajes = json.loads(cuerpo)
-                        if isinstance(mensajes, list):
-                            self._renderizar_historial(mensajes)
+                        datos = json.loads(cuerpo)
+                        if isinstance(datos, list):
+                            self._renderizar_historial(datos)
+                        elif isinstance(datos, dict) and "mensajes" in datos:
+                            self._renderizar_historial(datos["mensajes"])
                     except json.JSONDecodeError as e:
                         print(f"Error al leer historial: {e}")
                     return
+
+        hora_actual = datetime.now().strftime("%H:%M")
 
         # Mensaje privado entrante: <msg>remitente|texto
         if linea.startswith("<msg>"):
             cuerpo = linea.removeprefix("<msg>")
             if "|" in cuerpo:
                 remitente, texto = cuerpo.split("|", 1)
+                es_mio = remitente.strip().lower() == self.user_name.strip().lower()
                 if (
                     self.categoria_actual == "chats"
                     and self.usuario_activo.strip().lower() == remitente.strip().lower()
                 ):
-                    self.agregar_burbuja(remitente, texto, es_mio=False)
+                    self.agregar_burbuja(
+                        "Tú" if es_mio else remitente,
+                        texto,
+                        es_mio=es_mio,
+                        hora=hora_actual,
+                    )
                 else:
                     self.agregar_aviso_sistema(f"Nuevo mensaje privado de {remitente}")
             return
@@ -1087,7 +1173,13 @@ class MainWindow(QMainWindow, Ui_Messenger):
                     self.categoria_actual == "grupos"
                     and str(self.grupo_activo_id) == str(id_grupo)
                 ):
-                    self.agregar_burbuja(remitente, texto, es_mio=False)
+                    es_mio = remitente.strip().lower() == self.user_name.strip().lower()
+                    self.agregar_burbuja(
+                        "Tú" if es_mio else remitente,
+                        texto,
+                        es_mio=es_mio,
+                        hora=hora_actual,
+                    )
             return
 
         # Mensaje de canal entrante: <canal_msg>id_canal|remitente|texto
@@ -1099,7 +1191,13 @@ class MainWindow(QMainWindow, Ui_Messenger):
                     self.categoria_actual == "canal"
                     and str(self.canal_activo_id) == str(id_canal)
                 ):
-                    self.agregar_burbuja(remitente, texto, es_mio=False)
+                    es_mio = remitente.strip().lower() == self.user_name.strip().lower()
+                    self.agregar_burbuja(
+                        "Tú" if es_mio else remitente,
+                        texto,
+                        es_mio=es_mio,
+                        hora=hora_actual,
+                    )
             return
 
         # Mensaje global entrante
@@ -1107,9 +1205,13 @@ class MainWindow(QMainWindow, Ui_Messenger):
             remitente, texto = linea.split(":", 1)
             remitente = remitente.strip()
             texto = texto.strip()
-            self.historial_global.append(("burbuja", remitente, texto, False))
+            es_mio = remitente.lower() == self.user_name.strip().lower()
+            etiqueta = "Tú" if es_mio else remitente
+            self.historial_global.append(
+                ("burbuja", etiqueta, texto, es_mio, hora_actual)
+            )
             if self.categoria_actual == "chats" and self.usuario_activo == "Global":
-                self.agregar_burbuja(remitente, texto, es_mio=False)
+                self.agregar_burbuja(etiqueta, texto, es_mio=es_mio, hora=hora_actual)
         else:
             self.historial_global.append(("aviso", linea))
             if self.categoria_actual == "chats" and self.usuario_activo == "Global":
