@@ -34,33 +34,34 @@ python3 -c "import pyodbc; print(pyodbc.drivers())"
 
 ## Configuración del entorno en Ubuntu
 
-### 1. Instalar dependencias del sistema y el driver ODBC 18 de SQL Server
-
-Actualiza índices e instala las herramientas y cabeceras de desarrollo de `unixODBC`:
-
-```bash
+# 1. Actualizar repositorios e instalar Python, venv y librerías gráficas de Qt
 sudo apt-get update
-sudo apt-get install -y unixodbc-dev curl gnupg
+sudo apt-get install -y \
+    python3 python3-venv python3-pip \
+    libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+    libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
+    libxcb-shape0 libxcb-xfixes0 libgl1 libegl1 libdbus-1-3 libfontconfig1
 
+# 2. Entrar a la carpeta del proyecto cliente
+# (Asegúrate de que solo estén: chats/, uis/, images/ y requirements.txt; sin dbs/)
+cd /ruta/de/tu/proyecto_cliente
 
-curl -sSL [https://packages.microsoft.com/keys/microsoft.asc](https://packages.microsoft.com/keys/microsoft.asc) | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null
+# 3. Generar el requirements.txt exclusivo del cliente
+echo "PySide6" > requirements.txt
 
-curl -sSL "[https://packages.microsoft.com/config/ubuntu/$](https://packages.microsoft.com/config/ubuntu/$)(. /etc/os-release && echo "$VERSION_ID")/prod.list" | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
-
-sudo apt-get update
-
-sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
-
-#verificar registro
-
-odbcinst -q -d
-
+# 4. Crear y activar el entorno virtual
 python3 -m venv .venv
 source .venv/bin/activate
 
+# 5. Actualizar pip e instalar PySide6
+pip install --upgrade pip
 pip install -r requirements.txt
 
-python3 -c "import pyodbc; print(pyodbc.drivers())"```
+# 6. Verificar que PySide6 cargue correctamente (debe imprimir la versión sin errores)
+python3 -c "import PySide6; print('PySide6 listo:', PySide6.__version__)"
+
+# 7. Ejecutar el cliente
+python3 chats/main.py
 
 
 ##Configuración del entorno en macOS
