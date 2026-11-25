@@ -3,32 +3,11 @@ Chat de gpt
 
 ##Configuraipn del entorno en Fedora
 
-### 1. Instalar dependencias del sistema y el driver ODBC 18 de SQL Server
-
-Instala las herramientas base y las cabeceras de desarrollo de `unixODBC`:
-
-```bash
-
-sudo dnf install -y unixODBC-devel curl gnupg2
-
-sudo curl -fsSL [https://packages.microsoft.com/config/rhel/9/prod.repo](https://packages.microsoft.com/config/rhel/9/prod.repo) | sudo tee /etc/yum.repos.d/mssql-release.repo > /dev/null
-
-sudo ACCEPT_EULA=Y dnf install -y msodbcsql18
-
-#Verificar instalacion:
-
-odbcinst -q -d
-
-#crear entorno virtual
 
 python3 -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-
-#verificar conexcion a sqlserver
-
-python3 -c "import pyodbc; print(pyodbc.drivers())"
 
 
 
