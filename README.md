@@ -7,9 +7,12 @@ Chat de gpt
 
 Instala las herramientas base y las cabeceras de desarrollo de `unixODBC`:
 
+```bash
+
 sudo dnf install -y unixODBC-devel curl gnupg2
 
 sudo curl -fsSL [https://packages.microsoft.com/config/rhel/9/prod.repo](https://packages.microsoft.com/config/rhel/9/prod.repo) | sudo tee /etc/yum.repos.d/mssql-release.repo > /dev/null
+
 sudo ACCEPT_EULA=Y dnf install -y msodbcsql18
 
 #Verificar instalacion:
@@ -60,7 +63,7 @@ pip install -r requirements.txt
 python3 -c "import pyodbc; print(pyodbc.drivers())"```
 
 
-Configuración del entorno en macOS
+##Configuración del entorno en macOS
 
 Instalar Homebrew y el driver ODBC 18 de SQL Server
 
